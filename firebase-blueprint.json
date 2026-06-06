@@ -1,0 +1,155 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Security ledger user holding balance and cards",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Primary unique identifier of user"
+        },
+        "username": {
+          "type": "string",
+          "description": "User public handle"
+        },
+        "email": {
+          "type": "string",
+          "description": "Associated user emailaddress"
+        },
+        "name": {
+          "type": "string",
+          "description": "Full display name"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["user", "admin"],
+          "description": "System role restricting dashboard views"
+        },
+        "avatarUrl": {
+          "type": "string",
+          "description": "Profile picture URL"
+        },
+        "unreadNotifications": {
+          "type": "integer",
+          "description": "Unread alerts count"
+        },
+        "accounts": {
+          "type": "array",
+          "description": "Checking, savings, credit, or investment account lists"
+        },
+        "cards": {
+          "type": "array",
+          "description": "List of authorized physical or virtual cards"
+        },
+        "savingsGoals": {
+          "type": "array",
+          "description": "Target savings vaults"
+        },
+        "billers": {
+          "type": "array",
+          "description": "Registered billers and auto-pay settings"
+        },
+        "supportTickets": {
+          "type": "array",
+          "description": "Customer service support records"
+        }
+      },
+      "required": ["id", "username", "email", "name", "role", "accounts", "cards"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Individual account spendings and earnings",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique transaction ID"
+        },
+        "description": {
+          "type": "string",
+          "description": "Payment source description"
+        },
+        "amount": {
+          "type": "number",
+          "description": "Numeric delta (+/-)"
+        },
+        "date": {
+          "type": "string",
+          "description": "Readable local event date"
+        },
+        "timestamp": {
+          "type": "integer",
+          "description": "Sort order timing"
+        },
+        "category": {
+          "type": "string",
+          "description": "Category item label"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["successful", "pending", "declined"]
+        }
+      },
+      "required": ["id", "description", "amount", "date", "timestamp", "category"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System audit record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique record log identifier"
+        },
+        "timestamp": {
+          "type": "string",
+          "description": "ISO format time stamp"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Responsible participant ID"
+        },
+        "username": {
+          "type": "string",
+          "description": "Responsible participant handle"
+        },
+        "action": {
+          "type": "string",
+          "description": "System event type action"
+        },
+        "details": {
+          "type": "string",
+          "description": "Descriptive meta text context"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["success", "failed", "warning"]
+        }
+      },
+      "required": ["id", "timestamp", "userId", "username", "action", "details", "status"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "User",
+      "description": "Core bank member detail"
+    },
+    "users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Collection of un-bounded individual credit & debit transactions"
+    },
+    "admins/{userId}": {
+      "schema": "User",
+      "description": "Administrative bank operator details"
+    },
+    "admins/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Collection of administrative transaction receipts"
+    },
+    "auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Comprehensive administrative session and authorization logs"
+    }
+  }
+}

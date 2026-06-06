@@ -1,0 +1,6 @@
+{
+  "name": "Unity Core Bank",
+  "description": "Unitycore Bank: An ultra-modern, secure online banking platform with customizable user and admin dashboards, multi-account overview, transactions log, card controllers, and responsive financial charts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,173 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Role-based lookup: checks if current user acts with admin clearance
+    function isAdmin() {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // --- Entity Validators ---
+    function isValidUser(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.username is string && data.username.size() >= 2 && data.username.size() <= 128 &&
+        data.email is string && data.email.size() <= 256 &&
+        data.name is string && data.name.size() <= 256 &&
+        data.role in ['user', 'admin'] &&
+        data.accounts is list && data.accounts.size() <= 10 &&
+        data.cards is list && data.cards.size() <= 10 &&
+        data.unreadNotifications is number && data.unreadNotifications >= 0 &&
+        (!('savingsGoals' in data) || (data.savingsGoals is list && data.savingsGoals.size() <= 20)) &&
+        (!('billers' in data) || (data.billers is list && data.billers.size() <= 20)) &&
+        (!('supportTickets' in data) || (data.supportTickets is list && data.supportTickets.size() <= 20)) &&
+        (!('legalFirstName' in data) || (data.legalFirstName is string && data.legalFirstName.size() <= 128)) &&
+        (!('middleName' in data) || (data.middleName is string && data.middleName.size() <= 128)) &&
+        (!('legalLastName' in data) || (data.legalLastName is string && data.legalLastName.size() <= 128)) &&
+        (!('phoneNumber' in data) || (data.phoneNumber is string && data.phoneNumber.size() <= 64)) &&
+        (!('country' in data) || (data.country is string && data.country.size() <= 128)) &&
+        (!('typeOfAccount' in data) || (data.typeOfAccount is string && data.typeOfAccount.size() <= 64)) &&
+        (!('currency' in data) || (data.currency is string && data.currency.size() <= 16)) &&
+        (!('transactionPin' in data) || (data.transactionPin is string && data.transactionPin.size() <= 16)) &&
+        (!('password' in data) || (data.password is string && data.password.size() <= 256)) &&
+        (!('iban' in data) || (data.iban is string && data.iban.size() <= 64));
+    }
+
+    function isValidTransaction(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.description is string && data.description.size() <= 256 &&
+        data.amount is number &&
+        data.date is string && data.date.size() <= 64 &&
+        data.timestamp is number &&
+        data.category is string && data.category.size() <= 64;
+    }
+
+    function isValidAuditLog(data) {
+      return data.id is string && isValidId(data.id) &&
+        data.timestamp is string && data.timestamp.size() <= 64 &&
+        data.userId is string && isValidId(data.userId) &&
+        data.username is string && data.username.size() <= 128 &&
+        data.action is string && data.action.size() <= 64 &&
+        data.details is string && data.details.size() <= 2048 &&
+        data.status in ['success', 'failed', 'warning'];
+    }
+
+    // --- Security Rules Rulesets ---
+
+    // 1. Users Profile & Balance Sheet Collection
+    match /users/{userId} {
+      // List rules: Enforce filters using existing resource userId matching
+      allow list: if isSignedIn() && (resource.data.id == request.auth.uid || isAdmin());
+      allow get: if isOwner(userId) || isAdmin();
+
+      // Accounts created must have matching auth IDs
+      allow create: if isOwner(userId) && 
+        isValidUser(incoming()) && 
+        incoming().role == 'user' && // User cannot self-elevate on create
+        incoming().id == userId;
+
+      // Tiered update permissions: Users can adjust accounts, cards, savingsGoals, billers, supportTickets, and notification counts.
+      // Admins can change any field except the immutable userid constraint.
+      allow update: if isSignedIn() && (
+        (isOwner(userId) && 
+         isValidUser(incoming()) && 
+         incoming().id == existing().id &&
+         incoming().role == existing().role && // Prevent user role promotion
+         incoming().diff(existing()).affectedKeys().hasOnly([
+           'accounts', 'cards', 'unreadNotifications', 'savingsGoals', 'billers', 
+           'supportTickets', 'name', 'username', 'email', 'avatarUrl', 'legalFirstName', 'middleName', 
+           'legalLastName', 'phoneNumber', 'country', 'typeOfAccount', 'currency', 
+           'transactionPin', 'password', 'iban'
+         ])) ||
+        (isAdmin() && 
+         isValidUser(incoming()) && 
+         incoming().id == existing().id)
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // 2. Transactions Nested Collection (Unbounded list isolation)
+    match /users/{userId}/transactions/{transactionId} {
+      allow list: if isSignedIn() && (userId == request.auth.uid || isAdmin());
+      allow get: if isOwner(userId) || isAdmin();
+
+      // Allow write access if the authenticated user (request.auth.uid) matches the {userId} directory or is an admin
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // 2b. Admins Collection & Subcollections for Administrative Staff
+    match /admins/{userId} {
+      allow list: if isAdmin();
+      allow get: if isOwner(userId) || isAdmin();
+
+      allow create: if isOwner(userId) && 
+        isValidUser(incoming()) && 
+        incoming().role == 'admin' &&
+        incoming().id == userId;
+
+      allow update: if isSignedIn() && (
+        (isOwner(userId) && 
+         isValidUser(incoming()) && 
+         incoming().id == existing().id &&
+         incoming().role == existing().role &&
+         incoming().username == existing().username &&
+         incoming().email == existing().email) ||
+        (isAdmin() && 
+         isValidUser(incoming()) && 
+         incoming().id == existing().id)
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    match /admins/{userId}/transactions/{transactionId} {
+      allow list: if isSignedIn() && (userId == request.auth.uid || isAdmin());
+      allow get: if isOwner(userId) || isAdmin();
+      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+    }
+
+    // 3. System-wide Audit Log Collections
+    match /auditLogs/{logId} {
+      allow list, get: if isAdmin();
+
+      // Allow authenticated and unauthenticated actions to write audit trails securely
+      allow create: if isValidId(logId) && 
+        isValidAuditLog(incoming());
+
+      allow update, delete: if false; // Complete audit log tamper lock
+    }
+
+    // 4. Live Health & Sync Connection Telemetry
+    match /test-connection-latency/{docId} {
+      allow read: if true;
+    }
+
+  }
+}
