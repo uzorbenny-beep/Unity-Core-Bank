@@ -26,55 +26,18 @@ export default function LandingView({ onNavigate, onQuickLogin, onGoogleLogin }:
       {/* Main Content Area */}
       <div className="flex flex-col items-center justify-center flex-grow max-w-sm w-full text-center relative z-10 py-8">
         
-        {/* Glowing Futuristic Faceted "U" Logo matches exact visual of the screenshot */}
+        {/* Glowing Minimalist Premium Bank Emblem */}
         <div className="relative mb-6 cursor-pointer group">
-          <div className="absolute -inset-2.5 bg-indigo-600/20 rounded-full blur-xl opacity-80 group-hover:opacity-100 transition duration-500" />
+          <div className="absolute -inset-3 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full blur-xl opacity-40 group-hover:opacity-60 transition duration-500" />
           
-          <svg className="w-24 h-24 relative drop-shadow-[0_8px_16px_rgba(99,102,241,0.25)]" viewBox="0 0 100 100" fill="none">
-            {/* Facets 3D Poly System */}
-            {/* Left Outer Facet */}
-            <polygon points="25,15 41,15 41,45 25,55" fill="url(#uLeftOuterGrad)" />
-            {/* Left Lower Facet */}
-            <polygon points="25,55 41,45 50,85" fill="url(#uLeftOuterGrad)" opacity="0.95" />
-            
-            {/* Right Outer Facet */}
-            <polygon points="75,15 59,15 59,45 75,55" fill="url(#uRightOuterGrad)" />
-            {/* Right Lower Facet */}
-            <polygon points="75,55 59,45 50,85" fill="url(#uRightOuterGrad)" opacity="0.95" />
-            
-            {/* Left Inner Facet */}
-            <polygon points="41,15 50,22 50,52 41,45" fill="url(#uLeftInnerGrad)" />
-            {/* Right Inner Facet */}
-            <polygon points="59,15 50,22 50,52 59,45" fill="url(#uRightInnerGrad)" />
-            
-            {/* Bottom Accent Peak */}
-            <polygon points="41,45 50,52 59,45 50,85" fill="url(#uBottomGrad)" />
-
-            <defs>
-              <linearGradient id="uLeftOuterGrad" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#4338ca" />
-                <stop offset="50%" stopColor="#6366f1" />
-                <stop offset="100%" stopColor="#818cf8" />
-              </linearGradient>
-              <linearGradient id="uRightOuterGrad" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#2563eb" />
-                <stop offset="50%" stopColor="#3b82f6" />
-                <stop offset="100%" stopColor="#60a5fa" />
-              </linearGradient>
-              <linearGradient id="uLeftInnerGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#8a2be2" />
-                <stop offset="100%" stopColor="#6366f1" />
-              </linearGradient>
-              <linearGradient id="uRightInnerGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#22d3ee" />
-                <stop offset="100%" stopColor="#3b82f6" />
-              </linearGradient>
-              <linearGradient id="uBottomGrad" x1="0.5" y1="0" x2="0.5" y2="1">
-                <stop offset="0%" stopColor="#a855f7" />
-                <stop offset="100%" stopColor="#312e81" />
-              </linearGradient>
-            </defs>
-          </svg>
+          <div className="relative w-20 h-20 rounded-2xl bg-slate-900/90 border border-indigo-500/30 flex items-center justify-center p-4 shadow-xl">
+            <svg className="w-12 h-12 text-indigo-400 group-hover:text-blue-400 transition-colors duration-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" strokeWidth="1.5" />
+              <path d="M12 8v8" strokeWidth="1.5" />
+              <path d="M9 11h6" strokeWidth="1.5" />
+              <path d="M9 14h6" strokeWidth="1.5" />
+            </svg>
+          </div>
         </div>
 
         {/* Brand Display Typography */}
@@ -153,7 +116,7 @@ export default function LandingView({ onNavigate, onQuickLogin, onGoogleLogin }:
 
         {/* Legal Statement */}
         <p className="text-[9px] text-slate-500 text-center mt-5 tracking-wider font-mono">
-          © 2024 Unitycore Bank. All rights reserved.
+          © {new Date().getFullYear()} Unitycore Bank. All rights reserved.
         </p>
       </div>
 

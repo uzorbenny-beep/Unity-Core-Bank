@@ -20,10 +20,12 @@ import {
   Slash,
   Eye,
   Settings as SettingsIcon,
-  HardDrive
+  HardDrive,
+  Trash2
 } from 'lucide-react';
 import { BankUser, AuditLog, Transaction } from '../../types';
-import { saveUsersData, loadUsersData, loadAuditLogs, addAuditLog } from '../../mockData';
+import { saveUsersData, loadUsersData, loadAuditLogs, addAuditLog, loadDepositWithdrawConfigs, saveDepositWithdrawConfigs, DepositWithdrawMethodConfig } from '../../mockData';
+import { notificationService } from '../../notificationService';
 
 interface AdminDashboardViewProps {
   currentAdmin: BankUser;
@@ -34,8 +36,12 @@ interface AdminDashboardViewProps {
 }
 
 export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitch, onRefreshData, onRegisterUser }: AdminDashboardViewProps) {
-  const [activeTab, setActiveTab] = useState<'users' | 'transactions' | 'analytics' | 'reports'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'transactions' | 'analytics' | 'reports' | 'deposits_control'>('users');
   
+  // Deposit & Withdrawal configs state
+  const [depositWithdrawConfigs, setDepositWithdrawConfigs] = useState<DepositWithdrawMethodConfig[]>(() => loadDepositWithdrawConfigs());
+  const [editingConfigId, setEditingConfigId] = useState<'bank' | 'check' | 'crypto'>('bank');
+
   // State from LocalStorage
   const [users, setUsers] = useState<BankUser[]>(() => loadUsersData());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadAuditLogs());
@@ -54,6 +60,22 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
   const [regFullName, setRegFullName] = useState('');
   const [regError, setRegError] = useState('');
   const [regIsSubmitting, setRegIsSubmitting] = useState(false);
+
+  // Custom confirmation modal state (bypasses iframe blocker)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    description: string;
+    confirmText?: string;
+    cancelText?: string;
+    onConfirm: () => void;
+    isDanger?: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    description: '',
+    onConfirm: () => {},
+  });
 
   // Search parameters
   const [userQuery, setUserQuery] = useState('');
@@ -102,6 +124,101 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
       setTimeout(() => setEditSuccessMsg(''), 4000);
     }
+  };
+
+  const handleDeleteUser = (userId: string) => {
+    const allUsers = loadUsersData();
+    const userToDelete = allUsers.find(u => u.id === userId);
+    if (!userToDelete) return;
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete User Profile?',
+      description: `Are you absolutely sure you want to permanently delete the profile for "${userToDelete.name}" (@${userToDelete.username})? All associated transaction ledgers, cards, and localized configurations will be purged.`,
+      confirmText: 'Delete Permanently',
+      cancelText: 'Cancel',
+      isDanger: true,
+      onConfirm: async () => {
+        const updatedUsers = allUsers.filter(u => u.id !== userId);
+        saveUsersData(updatedUsers);
+
+        addAuditLog(
+          currentAdmin.username,
+          currentAdmin.id,
+          'USER_ACCOUNT_DELETED',
+          `Permanently deleted account folder of user ${userToDelete.username} (${userToDelete.email})`
+        );
+
+        try {
+          const { getActiveMode } = await import('../../dbService');
+          const { db } = await import('../../firebase');
+          const { doc, deleteDoc } = await import('firebase/firestore');
+
+          if (getActiveMode() === 'firebase' && db) {
+            console.log('[Firebase Admin Action] Deleting user doc from Firestore:', userId);
+            const userRef = doc(db, 'users', userId);
+            await deleteDoc(userRef);
+          }
+        } catch (err) {
+          console.warn('[Firebase Cleanup Warning] Failed to delete Firestore profile doc or offline:', err);
+        }
+
+        refreshLocalState();
+        setEditSuccessMsg(`User profile for "${userToDelete.name}" was successfully deleted.`);
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        setTimeout(() => setEditSuccessMsg(''), 4000);
+      }
+    });
+  };
+
+  const handleDeleteAllUsers = () => {
+    setConfirmModal({
+      isOpen: true,
+      title: '🚨 CRITICAL SYSTEM PURGE',
+      description: 'You are about to permanently purge ALL non-admin users from the system directories! This deletes all transaction history, custom logs, and ledger profiles. It is irreversibly final.',
+      confirmText: 'Wipe System Registers',
+      cancelText: 'Cancel',
+      isDanger: true,
+      onConfirm: async () => {
+        const allUsers = loadUsersData();
+        const nonAdmins = allUsers.filter(u => u.role !== 'admin');
+
+        try {
+          localStorage.removeItem('unitycore_users');
+        } catch (localErr) {
+          console.warn('Wiping storage warning:', localErr);
+        }
+
+        try {
+          const { getActiveMode } = await import('../../dbService');
+          const { db } = await import('../../firebase');
+          const { doc, deleteDoc } = await import('firebase/firestore');
+
+          if (getActiveMode() === 'firebase' && db) {
+            console.log('[Firebase Maintenance] Dispatched Firestore user cleanups...');
+            for (const user of nonAdmins) {
+              if (user.id !== 'user-james' && user.id !== 'user-credence') {
+                await deleteDoc(doc(db, 'users', user.id));
+              }
+            }
+          }
+        } catch (err) {
+          console.error('[Firebase Maintenance Error] Error during bulk deletions:', err);
+        }
+
+        addAuditLog(
+          currentAdmin.username,
+          currentAdmin.id,
+          'BULK_USERS_PURGE',
+          `Wiped all custom-registered client ledgers from the core database directory.`
+        );
+
+        refreshLocalState();
+        setEditSuccessMsg('Successfully purged all custom user directory folders. Default templates restored.');
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        setTimeout(() => setEditSuccessMsg(''), 4000);
+      }
+    });
   };
 
   const handleAdminRegisterSubmit = async (e: React.FormEvent) => {
@@ -163,6 +280,24 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
           
           transaction.status = newStatus;
           saveUsersData(allUsers);
+
+          // If the status is approved and becomes successful, send confirmation alert email
+          if (newStatus === 'successful') {
+            const flowDirection = transaction.amount >= 0 ? 'credit' : 'debit';
+            notificationService.sendTransactionAlert(
+              allUsers[userIdx],
+              transaction.amount,
+              `${transaction.description} (Approved by Security Command)`,
+              flowDirection
+            ).catch(err => console.error("Error sending admin approval alert email:", err));
+          } else if (newStatus === 'declined') {
+            notificationService.sendTransactionAlert(
+              allUsers[userIdx],
+              transaction.amount,
+              `DECLINED: ${transaction.description}`,
+              transaction.amount >= 0 ? 'credit' : 'debit'
+            ).catch(err => console.error("Error sending admin declining action notification:", err));
+          }
           
           addAuditLog(
             currentAdmin.username,
@@ -280,6 +415,17 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
             >
               <span>📜</span> Audit Reports
             </button>
+
+            <button
+              onClick={() => setActiveTab('deposits_control')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'deposits_control'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+              }`}
+            >
+              <span>⚙️</span> Deposits & Withdrawals
+            </button>
           </div>
         </div>
 
@@ -389,6 +535,16 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
         >
           <ShieldAlert className="w-4 h-4" /> Audit Trails
         </button>
+
+        <button
+          onClick={() => setActiveTab('deposits_control')}
+          className={`flex-1 py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+            activeTab === 'deposits_control' ? 'text-indigo-600 border-indigo-500 bg-indigo-50/20 font-bold' : 'text-slate-400 border-transparent hover:text-slate-600'
+          }`}
+          id="admin-tab-deposits"
+        >
+          <SettingsIcon className="w-4 h-4" /> Configs
+        </button>
       </div>
 
       <main className="flex-grow p-5 max-w-lg w-full mx-auto pb-10">
@@ -419,6 +575,13 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] rounded-lg transition cursor-pointer flex items-center gap-1 shadow-xs"
                 >
                   <Plus className="w-3.5 h-3.5" /> Register User
+                </button>
+                <button
+                  onClick={handleDeleteAllUsers}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] rounded-lg transition cursor-pointer flex items-center gap-1 shadow-xs"
+                  title="Purge all registered user directory accounts"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Wipe Custom Users
                 </button>
                 <button
                   onClick={refreshLocalState}
@@ -486,17 +649,26 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
                           <span className="text-indigo-600">{formatCurrency(savings)}</span>
                         </div>
                         
-                        {/* Adjust balances override button */}
-                        <button
-                          onClick={() => {
-                            setSelectedEditUser(u);
-                            setCheckingInputBalance(checking.toString());
-                            setSavingsInputBalance(savings.toString());
-                          }}
-                          className="text-[10px] bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition font-mono font-bold px-2 py-1 rounded-lg mt-1 text-indigo-700 cursor-pointer shadow-xs"
-                        >
-                          Modify Balance
-                        </button>
+                        {/* Adjust balances override button & Selective Delete */}
+                        <div className="flex gap-1.5 mt-1">
+                          <button
+                            onClick={() => {
+                              setSelectedEditUser(u);
+                              setCheckingInputBalance(checking.toString());
+                              setSavingsInputBalance(savings.toString());
+                            }}
+                            className="text-[10px] bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition font-mono font-bold px-2 py-1 rounded-lg text-indigo-700 cursor-pointer shadow-xs"
+                          >
+                            Modify Balance
+                          </button>
+                          <button
+                            onClick={() => handleDeleteUser(u.id)}
+                            className="bg-rose-50 border border-rose-200 hover:bg-rose-150 transition text-rose-600 p-1.5 rounded-lg flex items-center justify-center cursor-pointer shadow-xs text-xs font-bold"
+                            title="Purge user permanently"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -778,8 +950,8 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
               </div>
 
               <div className="flex justify-between text-[8px] font-mono text-slate-400">
-                <span>21:00 UTC</span>
-                <span>21:40 UTC</span>
+                <span>{new Date(Date.now() - 40 * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span>{new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
               </div>
             </div>
 
@@ -805,11 +977,21 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
               </div>
 
               <button
+                type="button"
                 onClick={() => {
-                  if (confirm('Reconciliation log clearing confirmation: Clears internal sandbox developer logs. proceed?')) {
-                    localStorage.removeItem('unitycore_audit_logs');
-                    refreshLocalState();
-                  }
+                  setConfirmModal({
+                    isOpen: true,
+                    title: 'Flush Audit Trail Logs?',
+                    description: 'This will completely empty the local security audit trail logs. This action is irreversibly final.',
+                    confirmText: 'Flush Now',
+                    cancelText: 'Cancel',
+                    isDanger: true,
+                    onConfirm: () => {
+                      localStorage.removeItem('unitycore_audit_logs');
+                      refreshLocalState();
+                      setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                    }
+                  });
                 }}
                 className="text-[10px] font-mono font-bold hover:underline text-rose-600 cursor-pointer"
               >
@@ -828,8 +1010,8 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
                       <span className="font-mono text-[10px] text-slate-400">{log.timestamp}</span>
                       <span className={`text-[9px] font-mono font-bold uppercase border px-1.5 py-0.5 rounded ${
                         log.status === 'success' 
-                          ? 'text-emerald-700 bg-emerald-50 border-emerald-100' 
-                          : 'text-rose-700 bg-rose-50 border-rose-100'
+                           ? 'text-emerald-700 bg-emerald-50 border-emerald-100' 
+                           : 'text-rose-700 bg-rose-50 border-rose-100'
                       }`}>
                         {log.action}
                       </span>
@@ -845,6 +1027,242 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
                 <p className="text-xs text-center text-slate-500 py-10 font-mono">Audit log buffer empty.</p>
               )}
             </div>
+          </div>
+        )}
+
+        {/* TAB 5: DEPOSITS & WITHDRAWALS CONFIGURATION DESK */}
+        {activeTab === 'deposits_control' && (
+          <div className="space-y-5 animate-fade-in text-slate-800">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 uppercase tracking-wider text-left">Deposits & Withdrawals Setup Desk</h3>
+              <p className="text-[10px] text-slate-500 mt-0.5 text-left font-sans">Control payment methods, guidelines, and addresses seen by clients</p>
+            </div>
+
+            {/* Config Mode Tabs */}
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100 rounded-xl font-sans">
+              {(['bank', 'check', 'crypto'] as const).map((id) => {
+                const label = id === 'bank' ? '🏦 Bank Pay' : id === 'check' ? '📝 Mobile Check' : '🪙 USDT / Crypto';
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setEditingConfigId(id)}
+                    className={`py-2 text-[10px] sm:text-xs font-bold rounded-lg transition cursor-pointer border-none ${
+                      editingConfigId === id
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-600 hover:bg-slate-200/50 hover:text-slate-850'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Currently Selected Config Content */}
+            {(() => {
+              const currentCfg = depositWithdrawConfigs.find((c) => c.id === editingConfigId);
+              if (!currentCfg) return null;
+
+              return (
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 shadow-xs text-left">
+                  <div className="flex justify-between items-center pb-2.5 border-b border-slate-150">
+                    <span className="text-xs font-extrabold text-blue-700 tracking-wide uppercase">
+                      Editing: {currentCfg.name}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className={`w-2 h-2 rounded-full ${currentCfg.depositEnabled || currentCfg.withdrawEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                      <span className="text-[10px] font-mono text-slate-400 font-bold uppercase">
+                        {(currentCfg.depositEnabled || currentCfg.withdrawEnabled) ? 'LIVE NODE' : 'OFFLINE'}
+                      </span>
+                    </span>
+                  </div>
+
+                  {/* Enable toggles */}
+                  <div className="grid grid-cols-2 gap-4 font-sans">
+                    <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                      <div className="flex flex-col text-left">
+                        <span className="text-xs font-extrabold text-slate-800">Allow Deposits</span>
+                        <span className="text-[9px] text-slate-400">Enable method to deposit funds</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={currentCfg.depositEnabled}
+                        onChange={(e) => {
+                          const updated = depositWithdrawConfigs.map((c) =>
+                            c.id === editingConfigId ? { ...c, depositEnabled: e.target.checked } : c
+                          );
+                          setDepositWithdrawConfigs(updated);
+                        }}
+                        className="w-4 h-4 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-100 rounded-xl">
+                      <div className="flex flex-col text-left">
+                        <span className="text-xs font-extrabold text-slate-800">Allow Withdrawals</span>
+                        <span className="text-[9px] text-slate-400">Enable method to withdraw funds</span>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={currentCfg.withdrawEnabled}
+                        onChange={(e) => {
+                          const updated = depositWithdrawConfigs.map((c) =>
+                            c.id === editingConfigId ? { ...c, withdrawEnabled: e.target.checked } : c
+                          );
+                          setDepositWithdrawConfigs(updated);
+                        }}
+                        className="w-4 h-4 cursor-pointer"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Instructions Fields */}
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-indigo-600 font-black uppercase tracking-wider block text-left">Deposit Guidelines / Instructions</label>
+                      <textarea
+                        rows={3}
+                        value={currentCfg.depositInstructions}
+                        onChange={(e) => {
+                          const updated = depositWithdrawConfigs.map((c) =>
+                            c.id === editingConfigId ? { ...c, depositInstructions: e.target.value } : c
+                          );
+                          setDepositWithdrawConfigs(updated);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-205 rounded-xl py-1.5 px-3 text-xs text-slate-805 outline-none focus:border-indigo-500 font-sans leading-relaxed resize-y focus:bg-white focus:text-slate-900 border-slate-200"
+                        placeholder="Provide detailed deposit steps..."
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-indigo-600 font-black uppercase tracking-wider block text-left">Withdrawal Guidelines / Instructions</label>
+                      <textarea
+                        rows={3}
+                        value={currentCfg.withdrawInstructions}
+                        onChange={(e) => {
+                          const updated = depositWithdrawConfigs.map((c) =>
+                            c.id === editingConfigId ? { ...c, withdrawInstructions: e.target.value } : c
+                          );
+                          setDepositWithdrawConfigs(updated);
+                        }}
+                        className="w-full bg-slate-50 border border-slate-205 rounded-xl py-1.5 px-3 text-xs text-slate-805 outline-none focus:border-indigo-500 font-sans leading-relaxed resize-y focus:bg-white focus:text-slate-900 border-slate-200"
+                        placeholder="Provide details on withdrawal steps, fees, timelines..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Custom fields configuration (Bank account details or wallet addresses) */}
+                  <div className="space-y-2 pt-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] text-indigo-600 font-black uppercase tracking-wider block text-left">Method Specifications / Wallet Data</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const updated = depositWithdrawConfigs.map((c) => {
+                            if (c.id === editingConfigId) {
+                              const uniqueKey = `Custom Field ${Object.keys(c.depositFields).length + 1}`;
+                              return {
+                                ...c,
+                                depositFields: {
+                                  ...c.depositFields,
+                                  [uniqueKey]: 'Custom specification value'
+                                }
+                              };
+                            }
+                            return c;
+                          });
+                          setDepositWithdrawConfigs(updated);
+                        }}
+                        className="text-[9px] font-bold text-indigo-605 bg-indigo-50 hover:bg-indigo-100 border-none px-2.5 py-1 rounded-sm transition cursor-pointer font-sans"
+                      >
+                        + Add Custom Field
+                      </button>
+                    </div>
+
+                    <div className="space-y-2 border border-slate-200 rounded-xl p-2 bg-slate-50 max-h-60 overflow-y-auto font-sans">
+                      {Object.entries(currentCfg.depositFields).map(([vKey, vVal]) => {
+                        return (
+                          <div key={vKey} className="flex gap-1.5 items-center bg-white p-1.5 rounded-lg border border-slate-200 shadow-3xs">
+                            <input
+                              type="text"
+                              value={vKey}
+                              onChange={(e) => {
+                                const newKey = e.target.value;
+                                if (!newKey) return;
+                                const updatedFields = { ...currentCfg.depositFields };
+                                const entries = Object.entries(updatedFields);
+                                const newEntries = entries.map(([k, v]) => k === vKey ? [newKey, v] : [k, v]);
+                                const updated = depositWithdrawConfigs.map((c) =>
+                                  c.id === editingConfigId ? { ...c, depositFields: Object.fromEntries(newEntries) } : c
+                                );
+                                setDepositWithdrawConfigs(updated);
+                              }}
+                              className="w-1/3 text-[10px] font-bold uppercase tracking-wide bg-slate-50 border border-slate-200 rounded px-1.5 py-1 text-slate-600 focus:bg-white outline-none"
+                              placeholder="Label"
+                            />
+                            <input
+                              type="text"
+                              value={vVal}
+                              onChange={(e) => {
+                                const newVal = e.target.value;
+                                const updatedFields = { ...currentCfg.depositFields, [vKey]: newVal };
+                                const updated = depositWithdrawConfigs.map((c) =>
+                                  c.id === editingConfigId ? { ...c, depositFields: updatedFields } : c
+                                );
+                                setDepositWithdrawConfigs(updated);
+                              }}
+                              className="flex-1 text-[10px] font-mono text-slate-800 bg-stone-50 border border-slate-200 rounded px-1.5 py-1 focus:bg-white outline-none font-bold"
+                              placeholder="Value or detail"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updatedFields = { ...currentCfg.depositFields };
+                                delete updatedFields[vKey];
+                                const updated = depositWithdrawConfigs.map((c) =>
+                                  c.id === editingConfigId ? { ...c, depositFields: updatedFields } : c
+                                );
+                                setDepositWithdrawConfigs(updated);
+                              }}
+                              className="text-rose-600 hover:bg-rose-50 p-1 rounded-sm border-none transition shrink-0 cursor-pointer flex items-center justify-center bg-transparent"
+                              title="Delete Field"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        );
+                      })}
+
+                      {Object.keys(currentCfg.depositFields).length === 0 && (
+                        <p className="text-[10px] text-center text-slate-400 py-3 font-mono">No custom specification fields defined.</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="pt-3 border-t border-slate-150 flex justify-end font-sans">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        saveDepositWithdrawConfigs(depositWithdrawConfigs);
+                        addAuditLog(
+                          currentAdmin.username,
+                          currentAdmin.id,
+                          'LEDGER_CONFIG_UPDATE',
+                          `Updated systemic rules, instructions & node addresses for ${currentCfg.name} (${currentCfg.id})`
+                        );
+                        setEditSuccessMsg(`Successfully saved and synced system configuration for ${currentCfg.name}!`);
+                        setTimeout(() => setEditSuccessMsg(''), 4000);
+                      }}
+                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold py-2 px-4 rounded-xl shadow-md border-none cursor-pointer transition flex items-center gap-1.5"
+                    >
+                      <span>💾</span> Save Config Node
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         )}
 
@@ -932,6 +1350,48 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
                   </button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Confirmation Modal */}
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 max-w-md w-full shadow-2xl animate-fade-in animate-duration-200">
+              <div className="flex items-start gap-4">
+                <div className={`p-2.5 rounded-full shrink-0 ${confirmModal.isDanger ? 'bg-rose-50 text-rose-600' : 'bg-slate-50 text-slate-100'}`}>
+                  <ShieldAlert className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-wide">
+                    {confirmModal.title}
+                  </h3>
+                  <p className="text-slate-500 mt-2 text-xs leading-relaxed font-sans font-medium">
+                    {confirmModal.description}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 mt-5">
+                <button 
+                  type="button"
+                  onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs py-2 rounded-lg transition font-bold cursor-pointer font-sans"
+                >
+                  {confirmModal.cancelText || 'Cancel'}
+                </button>
+                <button 
+                  type="button"
+                  onClick={confirmModal.onConfirm}
+                  className={`flex-1 text-white text-xs py-2 rounded-lg transition font-bold cursor-pointer font-sans ${
+                    confirmModal.isDanger 
+                      ? 'bg-rose-600 hover:bg-rose-700' 
+                      : 'bg-indigo-600 hover:bg-indigo-700'
+                  }`}
+                >
+                  {confirmModal.confirmText || 'Confirm'}
+                </button>
+              </div>
             </div>
           </div>
         )}

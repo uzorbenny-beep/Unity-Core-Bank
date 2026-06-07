@@ -28,8 +28,11 @@ import LoginView from "./views/LoginView";
 import RegisterView from "./views/RegisterView";
 import UserDashboardView from "./views/user/UserDashboardView";
 import AdminDashboardView from "./views/admin/AdminDashboardView";
+import VerificationPendingView from "./components/VerificationPendingView";
+import { getActiveMode } from "./dbService";
 
 import { dbService } from "./dbService";
+import { notificationService } from "./notificationService";
 
 import { BankUser, Account, CreditCard, Transaction } from "./types";
 import {
@@ -39,6 +42,7 @@ import {
   INITIAL_USER,
   INITIAL_ADMIN,
   INITIAL_CREDENCE_USER,
+  formatTransactionDate,
 } from "./mockData";
 import {
   auth,
@@ -62,7 +66,7 @@ export function generateUniqueIBAN(): string {
 
 export default function App() {
   const [currentView, setCurrentView] = useState<
-    "landing" | "login" | "register" | "user-dashboard" | "admin-dashboard"
+    "landing" | "login" | "register" | "user-dashboard" | "admin-dashboard" | "verification-pending"
   >("landing");
   const [activeUser, setActiveUser] = useState<BankUser | null>(null);
 
@@ -289,7 +293,11 @@ export default function App() {
                         (u) => u.id !== uid,
                       );
                       saveUsersData([...filteredList, resolvedUser]);
-                      setCurrentView("user-dashboard");
+                      if (getActiveMode() === "firebase" && !firebaseUser.emailVerified && resolvedUser.role === "user") {
+                        setCurrentView("verification-pending");
+                      } else {
+                        setCurrentView("user-dashboard");
+                      }
                     },
                     (error) => {
                       handleFirestoreError(
@@ -347,7 +355,7 @@ export default function App() {
                 id: `tx-init-${Date.now()}`,
                 description: "Unitycore Secure Ledger Activation",
                 amount: 0,
-                date: "Just Now",
+                date: formatTransactionDate(Date.now()),
                 timestamp: Date.now(),
                 category: "other",
                 status: "successful",
@@ -358,7 +366,7 @@ export default function App() {
                 id: `tx-init-dep-${Date.now()}`,
                 description: "Activation First Ledger Deposit",
                 amount: initialBalance,
-                date: "Just Now",
+                date: formatTransactionDate(Date.now() - 1000),
                 timestamp: Date.now() - 1000,
                 category: "salary",
                 status: "pending",
@@ -467,13 +475,20 @@ export default function App() {
             const currentList = loadUsersData();
             saveUsersData([...currentList, newGoogleUser]);
 
+            // Fire welcome registration email and notifications
+            notificationService.sendRegistrationNotification(newGoogleUser, initialBalance).catch(err => console.error("Error creating Google register welcome:", err));
+
             addAuditLog(
               newGoogleUser.username,
               newGoogleUser.id,
               "ONBOARDING_COMPLETED",
               "Created new secure ledger from verified credentials.",
             );
-            setCurrentView("user-dashboard");
+            if (getActiveMode() === "firebase" && !firebaseUser.emailVerified) {
+              setCurrentView("verification-pending");
+            } else {
+              setCurrentView("user-dashboard");
+            }
           }
         } catch (error) {
           console.warn(
@@ -564,7 +579,14 @@ export default function App() {
     try {
       const user = await dbService.signIn(emailOrUsername.trim(), password);
       setActiveUser(user);
-      setCurrentView(user.role === "admin" ? "admin-dashboard" : "user-dashboard");
+      if (user.role !== "admin") {
+        notificationService.sendLoginAlert(user).catch(err => console.error("Error creating login alert:", err));
+      }
+      if (getActiveMode() === "firebase" && auth.currentUser && !auth.currentUser.emailVerified && user.role === "user") {
+        setCurrentView("verification-pending");
+      } else {
+        setCurrentView(user.role === "admin" ? "admin-dashboard" : "user-dashboard");
+      }
     } catch (error: any) {
       console.error("Login Error:", error);
       throw error;
@@ -599,8 +621,14 @@ export default function App() {
         additionalFields
       );
       setActiveUser(newUser);
-      setCurrentView("user-dashboard");
+      notificationService.sendRegistrationNotification(newUser, initialDepositAmount).catch(err => console.error("Error creating register welcome:", err));
+      if (getActiveMode() === "firebase" && auth.currentUser && !auth.currentUser.emailVerified) {
+        setCurrentView("verification-pending");
+      } else {
+        setCurrentView("user-dashboard");
+      }
     } catch (error: any) {
+
       console.error("Registration error:", error);
       throw error;
     }
@@ -745,7 +773,7 @@ export default function App() {
             id: `tx-init-${Date.now()}`,
             description: "Unitycore Secure Ledger Activation",
             amount: 0,
-            date: "Just Now",
+            date: formatTransactionDate(Date.now()),
             timestamp: Date.now(),
             category: "other",
             status: "successful",
@@ -790,6 +818,9 @@ export default function App() {
       // Save to LocalStorage fallback
       const currentList = loadUsersData();
       saveUsersData([...currentList, newUser]);
+
+      // Fire welcome registration email and notifications
+      notificationService.sendRegistrationNotification(newUser, 0).catch(err => console.error("Error creating register welcome from admin signup:", err));
 
       addAuditLog(
         activeUser ? activeUser.username : "admin",
@@ -866,6 +897,16 @@ export default function App() {
             onBack={() => setCurrentView("landing")}
             onRegisterSuccess={handleRegisterInputSuccess}
             onGoogleLogin={handleGoogleLogin}
+          />
+        )}
+
+        {currentView === "verification-pending" && (
+          <VerificationPendingView
+            currentUser={activeUser}
+            onBack={handleLogout}
+            onVerifiedAndProceed={() => {
+              setCurrentView("user-dashboard");
+            }}
           />
         )}
 

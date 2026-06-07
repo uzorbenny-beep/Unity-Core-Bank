@@ -17,11 +17,12 @@ interface LoginViewProps {
 export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogleLogin }: LoginViewProps) {
   const [bankingTab, setBankingTab] = useState<'personal' | 'business'>('personal');
   const [username, setUsername] = useState('james');
-  const [password, setPassword] = useState('password');
+  const [password, setPassword] = useState('password123');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showDbSettings, setShowDbSettings] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -52,6 +53,17 @@ export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogle
   return (
     <div className="min-h-screen bg-[#070b19] text-white flex flex-col justify-between items-center px-4 py-6 relative overflow-y-auto">
       
+      {/* Subtle DB Config Toggle Button - hidden by default to keep screen clean */}
+      <button
+        type="button"
+        onClick={() => setShowDbSettings(!showDbSettings)}
+        className="absolute top-4 right-4 z-20 p-2 text-slate-500 hover:text-blue-400 bg-slate-900/40 hover:bg-slate-850 border border-slate-800/10 hover:border-slate-800 rounded-xl transition cursor-pointer"
+        id="btn-toggle-dev-db"
+        title="Toggle Database Settings"
+      >
+        <Settings2 className="w-4 h-4" />
+      </button>
+
       {/* Background Soft Gradients */}
       <div className="absolute top-0 right-1/4 w-[280px] h-[280px] bg-blue-600/10 rounded-full blur-[100px] pointer-events-none" />
       <div className="absolute bottom-10 left-10 w-[200px] h-[200px] bg-blue-500/5 rounded-full blur-[80px] pointer-events-none" />
@@ -228,11 +240,13 @@ export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogle
         </form>
 
         {/* Divider */}
-        <div className="flex items-center my-4">
-          <span className="flex-1 h-px bg-slate-800" />
-          <span className="text-[10px] text-slate-505 text-slate-500 px-3 uppercase tracking-widest font-mono">or</span>
-          <span className="flex-1 h-px bg-slate-800" />
-        </div>
+        {showDbSettings && (
+          <div className="flex items-center my-4">
+            <span className="flex-1 h-px bg-slate-800" />
+            <span className="text-[10px] text-slate-550 text-slate-500 px-3 uppercase tracking-widest font-mono">or</span>
+            <span className="flex-1 h-px bg-slate-800" />
+          </div>
+        )}
 
         {/* Face ID Login Button */}
         <button
@@ -244,79 +258,82 @@ export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogle
           <span>Sign in with Face ID</span>
         </button>
 
-        <button
-          type="button"
-          onClick={onGoogleLogin}
-          className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-[#131a30] border border-slate-800/80 text-white font-bold py-3 px-4 rounded-xl transition duration-150 text-xs cursor-pointer mt-2"
-          id="btn-google-login-loginview"
-        >
-          <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-            <path fill="#EA4335" d="M12 5.04c1.61 0 3.05.55 4.19 1.64l3.12-3.12C17.43 1.84 14.9 1 12 1 7.35 1 3.4 3.65 1.5 7.5l3.6 2.8C6.01 7.24 8.76 5.04 12 5.04z" />
-            <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.44h6.46c-.28 1.48-1.12 2.73-2.38 3.58l3.6 2.8c2.11-1.95 3.33-4.82 3.33-8.48z" />
-            <path fill="#FBBC05" d="M5.1 14.7c-.24-.71-.38-1.47-.38-2.7s.14-1.99.38-2.7L1.5 6.5C.54 8.42 0 10.61 0 12s.54 3.58 1.5 5.5l3.6-2.8z" />
-            <path fill="#34A853" d="M12 23c3.24 0 5.97-1.08 7.96-2.92l-3.6-2.8c-1.11.74-2.53 1.18-4.36 1.18-3.24 0-5.99-2.2-6.97-5.26l-3.6 2.8C3.4 20.35 7.35 23 12 23z" />
-          </svg>
-          <span>Continue with Google</span>
-        </button>
+        {showDbSettings && (
+          <button
+            type="button"
+            onClick={onGoogleLogin}
+            className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-[#131a30] border border-slate-800/80 text-white font-bold py-3 px-4 rounded-xl transition duration-150 text-xs cursor-pointer mt-2"
+            id="btn-google-login-loginview"
+          >
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <path fill="#EA4335" d="M12 5.04c1.61 0 3.05.55 4.19 1.64l3.12-3.12C17.43 1.84 14.9 1 12 1 7.35 1 3.4 3.65 1.5 7.5l3.6 2.8C6.01 7.24 8.76 5.04 12 5.04z" />
+              <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.44h6.46c-.28 1.48-1.12 2.73-2.38 3.58l3.6 2.8c2.11-1.95 3.33-4.82 3.33-8.48z" />
+              <path fill="#FBBC05" d="M5.1 14.7c-.24-.71-.38-1.47-.38-2.7s.14-1.99.38-2.7L1.5 6.5C.54 8.42 0 10.61 0 12s.54 3.58 1.5 5.5l3.6-2.8z" />
+              <path fill="#34A853" d="M12 23c3.24 0 5.97-1.08 7.96-2.92l-3.6-2.8c-1.11.74-2.53 1.18-4.36 1.18-3.24 0-5.99-2.2-6.97-5.26l-3.6 2.8C3.4 20.35 7.35 23 12 23z" />
+            </svg>
+            <span>Continue with Google</span>
+          </button>
+        )}
       </div>
 
       {/* Database Schema & Integrations Guideline Drawer */}
-      <div className="w-full max-w-sm bg-[#0a0f1d] border border-slate-800/80 rounded-2xl p-4.5 mt-5 relative z-10 shadow-lg text-left text-xs text-slate-350">
-        <div className="flex items-center gap-2 mb-3 text-blue-400 font-bold">
-          <Database className="w-4 h-4" />
-          <span>Database & Integration Control</span>
-        </div>
-
-        <p className="text-slate-400 leading-normal mb-3">
-          Integrate with <span className="text-white font-bold">Supabase (PostgreSQL)</span> or <span className="text-white font-bold">phpMyAdmin (MySQL)</span> effortlessly. Configure your database driver live:
-        </p>
-
-        {/* Database Driver Toggle Buttons */}
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          <button
-            type="button"
-            onClick={() => {
-              localStorage.setItem("active_db_driver", "supabase");
-              alert("Supabase driver selected as active live connector. Ensure VITE_SUPABASE_URL is configured.");
-              window.location.reload();
-            }}
-            className={`py-2 px-2.5 rounded-lg border text-[11px] font-bold text-center cursor-pointer transition flex items-center justify-center gap-1.5 ${
-              getActiveMode() === "supabase"
-                ? "bg-emerald-900/20 border-emerald-500/60 text-emerald-400 font-extrabold"
-                : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <Server className="w-3.5 h-3.5" />
-            Supabase Cloud
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              localStorage.setItem("active_db_driver", "fallback_secure");
-              alert("Switched to Secure Sandbox database driver. Accounts are securely isolated and persisted in browser storage.");
-              window.location.reload();
-            }}
-            className={`py-2 px-2.5 rounded-lg border text-[11px] font-bold text-center cursor-pointer transition flex items-center justify-center gap-1.5 ${
-              getActiveMode() === "fallback_secure"
-                ? "bg-blue-900/30 border-blue-500/60 text-blue-450 text-blue-400 font-extrabold"
-                : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <Settings2 className="w-3.5 h-3.5" />
-            Secure Fallback
-          </button>
-        </div>
-
-        {/* Informative Accordion for Schemas */}
-        <div className="space-y-2 mt-3 bg-[#070b14] border border-slate-800/60 rounded-xl p-3">
-          <div className="flex items-center gap-1.5 text-[10.5px] font-mono text-slate-400 mb-1 font-bold">
-            <Terminal className="w-3.5 h-3.5 text-slate-500" />
-            <span>Schema Setup Reference SQL:</span>
+      {showDbSettings && (
+        <div className="w-full max-w-sm bg-[#0a0f1d] border border-slate-800/80 rounded-2xl p-4.5 mt-5 relative z-10 shadow-lg text-left text-xs text-slate-350">
+          <div className="flex items-center gap-2 mb-3 text-blue-400 font-bold">
+            <Database className="w-4 h-4" />
+            <span>Database & Integration Control</span>
           </div>
-          
-          <div className="space-y-1 text-[10px] font-mono">
-            <span className="text-emerald-400 font-bold block mt-1"># For Supabase (Postgres Console SQL):</span>
-            <pre className="bg-slate-950 p-2 rounded text-[9px] text-slate-300 overflow-x-auto whitespace-pre leading-tight">
+
+          <p className="text-slate-400 leading-normal mb-3">
+            Integrate with <span className="text-white font-bold">Supabase (PostgreSQL)</span> or <span className="text-white font-bold">phpMyAdmin (MySQL)</span> effortlessly. Configure your database driver live:
+          </p>
+
+          {/* Database Driver Toggle Buttons */}
+          <div className="grid grid-cols-2 gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem("active_db_driver", "supabase");
+                alert("Supabase driver selected as active live connector. Ensure VITE_SUPABASE_URL is configured.");
+                window.location.reload();
+              }}
+              className={`py-2 px-2.5 rounded-lg border text-[11px] font-bold text-center cursor-pointer transition flex items-center justify-center gap-1.5 ${
+                getActiveMode() === "supabase"
+                  ? "bg-emerald-900/20 border-emerald-500/60 text-emerald-400 font-extrabold"
+                  : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Server className="w-3.5 h-3.5" />
+              Supabase Cloud
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem("active_db_driver", "fallback_secure");
+                alert("Switched to Secure Sandbox database driver. Accounts are securely isolated and persisted in browser storage.");
+                window.location.reload();
+              }}
+              className={`py-2 px-2.5 rounded-lg border text-[11px] font-bold text-center cursor-pointer transition flex items-center justify-center gap-1.5 ${
+                getActiveMode() === "fallback_secure"
+                  ? "bg-blue-900/30 border-blue-500/60 text-blue-450 text-blue-400 font-extrabold"
+                  : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Settings2 className="w-3.5 h-3.5" />
+              Secure Fallback
+            </button>
+          </div>
+
+          {/* Informative Accordion for Schemas */}
+          <div className="space-y-2 mt-3 bg-[#070b14] border border-slate-800/60 rounded-xl p-3">
+            <div className="flex items-center gap-1.5 text-[10.5px] font-mono text-slate-400 mb-1 font-bold">
+              <Terminal className="w-3.5 h-3.5 text-slate-500" />
+              <span>Schema Setup Reference SQL:</span>
+            </div>
+            
+            <div className="space-y-1 text-[10px] font-mono">
+              <span className="text-emerald-400 font-bold block mt-1"># For Supabase (Postgres Console SQL):</span>
+              <pre className="bg-slate-950 p-2 rounded text-[9px] text-slate-300 overflow-x-auto whitespace-pre leading-tight">
 {`CREATE TABLE users (
   id UUID PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
@@ -326,12 +343,12 @@ export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogle
   profile_data JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );`}
-            </pre>
-          </div>
+              </pre>
+            </div>
 
-          <div className="space-y-1 text-[10px] font-mono">
-            <span className="text-yellow-405 text-yellow-500 font-bold block mt-2"># For phpMyAdmin (MySQL SQL Console):</span>
-            <pre className="bg-slate-950 p-2 rounded text-[9px] text-slate-300 overflow-x-auto whitespace-pre leading-tight">
+            <div className="space-y-1 text-[10px] font-mono">
+              <span className="text-yellow-405 text-yellow-500 font-bold block mt-2"># For phpMyAdmin (MySQL SQL Console):</span>
+              <pre className="bg-slate-950 p-2 rounded text-[9px] text-slate-300 overflow-x-auto whitespace-pre leading-tight">
 {`CREATE TABLE users (
   id VARCHAR(128) PRIMARY KEY,
   email VARCHAR(128) UNIQUE NOT NULL,
@@ -341,14 +358,15 @@ export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogle
   profile_data JSON,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );`}
-            </pre>
-          </div>
+              </pre>
+            </div>
 
-          <div className="text-[10px] text-slate-400 mt-2 bg-blue-950/20 border border-blue-900/30 p-2 rounded">
-            💡 <span className="text-white font-bold">Vercel Setup:</span> Set your <span className="font-mono text-blue-400">VITE_SUPABASE_URL</span> and <span className="font-mono text-blue-400">VITE_SUPABASE_ANON_KEY</span> as Environment Variables during project deployment for instantaneous native database binding.
+            <div className="text-[10px] text-slate-400 mt-2 bg-blue-950/20 border border-blue-900/30 p-2 rounded">
+              💡 <span className="text-white font-bold">Vercel Setup:</span> Set your <span className="font-mono text-blue-400">VITE_SUPABASE_URL</span> and <span className="font-mono text-blue-400">VITE_SUPABASE_ANON_KEY</span> as Environment Variables during project deployment for instantaneous native database binding.
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
 
       {/* Footer Indicators */}

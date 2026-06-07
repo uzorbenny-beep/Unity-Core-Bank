@@ -34,9 +34,22 @@ import {
   ScanFace,
   ShieldAlert
 } from 'lucide-react';
-import { BankUser, Account, Transaction, CreditCard, SavingsGoal, Biller, SupportTicket } from '../../types';
+import { BankUser, Account, Transaction, CreditCard, SavingsGoal, Biller, SupportTicket, BankNotification } from '../../types';
 import FinancialChart from '../../components/FinancialChart';
-import { saveUsersData, loadUsersData, addAuditLog } from '../../mockData';
+import { saveUsersData, loadUsersData, addAuditLog, getRelativeDateString, formatTransactionDate, loadDepositWithdrawConfigs, DepositWithdrawMethodConfig } from '../../mockData';
+import { notificationService } from '../../notificationService';
+
+const TIMEZONES = [
+  { id: 'auto', label: 'Default / Local Browser', offset: 'Auto' },
+  { id: 'Africa/Lagos', label: 'West Africa Time (WAT)', offset: 'WAT (Lagos, UTC+1)', flag: '🇳🇬' },
+  { id: 'America/New_York', label: 'Eastern Time (EST/EDT)', offset: 'EST (New York, UTC-5)', flag: '🇺🇸' },
+  { id: 'America/Chicago', label: 'Central Time (CST/CDT)', offset: 'CST (Chicago, UTC-6)', flag: '🇺🇸' },
+  { id: 'America/Los_Angeles', label: 'Pacific Time (PST/PDT)', offset: 'PST (Los Angeles, UTC-8)', flag: '🇺🇸' },
+  { id: 'Europe/London', label: 'Greenwich Mean Time (GMT)', offset: 'GMT (London, UTC+0)', flag: '🇬🇧' },
+  { id: 'Europe/Paris', label: 'Central European Time (CET)', offset: 'CET (Paris, UTC+1)', flag: '🇫🇷' },
+  { id: 'Asia/Dubai', label: 'Gulf Standard Time (GST)', offset: 'GST (Dubai, UTC+4)', flag: '🇦🇪' },
+  { id: 'Asia/Singapore', label: 'Singapore Standard Time (SGT)', offset: 'SGT (Singapore, UTC+8)', flag: '🇸🇬' },
+];
 
 interface UserDashboardViewProps {
   currentUser: BankUser;
@@ -48,6 +61,29 @@ interface UserDashboardViewProps {
 export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch, onRefreshUser }: UserDashboardViewProps) {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'accounts' | 'transfers' | 'cards' | 'more' | 'activity' | 'intl-wire' | 'deposit' | 'loan' | 'irs-refund' | 'support' | 'investment' | 'crypto' | 'grant' | 'vaults'>('dashboard');
   const [showBankingMenu, setShowBankingMenu] = useState(false);
+
+  // Timezone & Live clock states
+  const [selectedTimezone, setSelectedTimezone] = useState(() => {
+    return (typeof localStorage !== 'undefined' ? localStorage.getItem('user_timezone') : null) || 'auto';
+  });
+  const [currentHeaderTime, setCurrentHeaderTime] = useState<Date>(new Date());
+  const [showTzDropdown, setShowTzDropdown] = useState(false);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentHeaderTime(new Date());
+    }, 1000);
+
+    const handleTzChanged = () => {
+      setSelectedTimezone((typeof localStorage !== 'undefined' ? localStorage.getItem('user_timezone') : null) || 'auto');
+    };
+    window.addEventListener('timezone-changed', handleTzChanged);
+
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('timezone-changed', handleTzChanged);
+    };
+  }, []);
 
   // Profile Editable state
   const [profileFirstName, setProfileFirstName] = useState(currentUser.legalFirstName || '');
@@ -98,7 +134,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
   const [investAmount, setInvestAmount] = useState('');
   const [investSuccessMsg, setInvestSuccessMsg] = useState('');
   const [investmentsList, setInvestmentsList] = useState<Array<{ id: string; planName: string; amount: number; rate: number; startDate: string; daysRemaining: number; currentEarnings: number; status: 'Active' | 'Matured' }>>([
-    { id: 'inv-3091', planName: 'Silver (5% Daily ROI)', amount: 15000, rate: 5.0, startDate: 'May 20, 2026', daysRemaining: 14, currentEarnings: 5250, status: 'Active' }
+    { id: 'inv-3091', planName: 'Silver (5% Daily ROI)', amount: 15000, rate: 5.0, startDate: getRelativeDateString(17, true), daysRemaining: 14, currentEarnings: 5250, status: 'Active' }
   ]);
 
   // Crypto Swap State Variables
@@ -216,6 +252,18 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [depositOrWithdraw, setDepositOrWithdraw] = useState<'deposit' | 'withdraw'>('deposit');
   
+  // Rearranged deposit/withdrawal state
+  const [selectedMethodId, setSelectedMethodId] = useState<'bank' | 'check' | 'crypto'>('bank');
+  const [dwConfigs, setDwConfigs] = useState<DepositWithdrawMethodConfig[]>(() => loadDepositWithdrawConfigs());
+  const [dwReference, setDwReference] = useState('');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (showDepositModal || activeTab === 'deposit') {
+      setDwConfigs(loadDepositWithdrawConfigs());
+    }
+  }, [showDepositModal, activeTab]);
+  
   // Transfer state
   const [transferFrom, setTransferFrom] = useState('acc-checking');
   const [transferTo, setTransferTo] = useState('acc-savings');
@@ -230,6 +278,10 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
 
   // Notification states
   const [showNotifications, setShowNotifications] = useState(false);
+  const [generatedSecurityCode, setGeneratedSecurityCode] = useState('1234');
+  const [selectedEmailForViewer, setSelectedEmailForViewer] = useState<BankNotification | null>(null);
+  const [notificationInboxFilter, setNotificationInboxFilter] = useState<'all' | 'email' | 'push'>('all');
+  const [activeInAppToasts, setActiveInAppToasts] = useState<BankNotification[]>([]);
   
   // Search state for transactions
   const [searchQuery, setSearchQuery] = useState('');
@@ -314,6 +366,30 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     onRefreshUser(currentUser.username);
   };
 
+  // Listen for real-time notification events to display sliding dynamic push toasts in current window
+  useEffect(() => {
+    const handleNewNotification = (e: Event) => {
+      const customEvent = e as CustomEvent<BankNotification>;
+      if (customEvent.detail) {
+        const notif = customEvent.detail;
+        setActiveInAppToasts(prev => [notif, ...prev]);
+
+        // Auto-refresh layout databases to remain synced
+        triggerStateRefresh();
+
+        // Auto-clear toast alert after 6 seconds
+        setTimeout(() => {
+          setActiveInAppToasts(prev => prev.filter(t => t.id !== notif.id));
+        }, 6000);
+      }
+    };
+
+    window.addEventListener('new-bank-notification', handleNewNotification);
+    return () => {
+      window.removeEventListener('new-bank-notification', handleNewNotification);
+    };
+  }, []);
+
   // PIN Verification Trigger Callback helper
   const promptSecurityCheck = (
     type: 'PIN' | 'OTP' | 'WIRE_CODE',
@@ -321,6 +397,9 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     desc: string,
     onSuccessCallback: () => void
   ) => {
+    const tempCode = Math.floor(1000 + Math.random() * 9000).toString();
+    setGeneratedSecurityCode(tempCode);
+
     setSecurityModalType(type);
     setSecurityModalTitle(title);
     setSecurityModalDesc(desc);
@@ -331,11 +410,18 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     setBiometricScanSuccess(false);
     setUseBackupPin(false);
     setShowSecurityModal(true);
+
+    // Trigger interactive notification dispatch alert for the code!
+    notificationService.sendOtpAuthenticationCode(
+      currentUser,
+      `${title} Authorization Requested`,
+      tempCode
+    ).catch(err => console.error("Error dispatching OTP action notification code:", err));
   };
 
   const handleVerifySecurityCode = (e: React.FormEvent) => {
     e.preventDefault();
-    if (securityCodeInput === '1234') {
+    if (securityCodeInput === generatedSecurityCode || securityCodeInput === '1234') {
       setShowSecurityModal(false);
       setSecurityCodeInput('');
       setSecurityErrorMsg('');
@@ -343,7 +429,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         securityOnSuccess();
       }
     } else {
-      setSecurityErrorMsg('Invalid security authorization PIN or OTP code. Access denied.');
+      setSecurityErrorMsg(`Invalid security authorization dynamic code or PIN (${generatedSecurityCode} or 1234). Access denied.`);
     }
   };
 
@@ -388,6 +474,26 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     try {
       setProfileUpdateError('');
       setProfileUpdateSuccess('');
+
+      // Auto update active timezone based on Residing Country
+      let determinedTz = (typeof localStorage !== 'undefined' ? localStorage.getItem('user_timezone') : null) || 'auto';
+      const c = profileCountry.trim().toLowerCase();
+      if (c.includes('nigeria') || c.includes('lagos') || c.includes('west africa') || c.includes('africa') || c.includes('niger') || c.includes('ghana') || c.includes('cameroon')) {
+        determinedTz = 'Africa/Lagos';
+      } else if (c.includes('united states') || c.includes('america') || c.includes('new york') || c.includes('est') || c.includes('us') || c.includes('washington') || c.includes('canada') || c.includes('toronto')) {
+        determinedTz = 'America/New_York';
+      } else if (c.includes('united kingdom') || c.includes('london') || c.includes('england') || c.includes('gmt') || c.includes('uk')) {
+        determinedTz = 'Europe/London';
+      } else if (c.includes('france') || c.includes('paris') || c.includes('cet') || c.includes('europe')) {
+        determinedTz = 'Europe/Paris';
+      } else if (c.includes('dubai') || c.includes('uae') || c.includes('emirates') || c.includes('gst')) {
+        determinedTz = 'Asia/Dubai';
+      } else if (c.includes('singapore') || c.includes('sgt') || c.includes('asia')) {
+        determinedTz = 'Asia/Singapore';
+      }
+      localStorage.setItem('user_timezone', determinedTz);
+      setSelectedTimezone(determinedTz);
+      window.dispatchEvent(new Event('timezone-changed'));
 
       // 1. Update localStorage
       const allUsers = loadUsersData();
@@ -502,7 +608,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
             id: `tx-inv-${Date.now()}`,
             description: `Funded ${planNames[investPlan]}`,
             amount: -amount,
-            date: 'Just Now',
+            date: formatTransactionDate(Date.now()),
             timestamp: Date.now(),
             category: 'transfer' as const
           };
@@ -581,7 +687,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           id: `tx-swap-${Date.now()}`,
           description: `Crypto Swapped ${cryptoFrom} to ${cryptoTo}`,
           amount: cryptoFrom === 'USD' ? -amount : cryptoTo === 'USD' ? targetReceivedAmount : 0,
-          date: 'Just Now',
+          date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
           category: 'transfer' as const
         };
@@ -634,7 +740,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
               id: `tx-grant-${Date.now()}`,
               description: `Approved Capital Welfare Grant`,
               amount: parsedAmt,
-              date: 'Just Now',
+              date: formatTransactionDate(Date.now()),
               timestamp: Date.now(),
               category: 'salary' as const
             };
@@ -679,6 +785,13 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     return isNegative ? `-${text}` : text;
   };
 
+  // Clipboard copying helper
+  const handleCopy = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(label);
+    setTimeout(() => setCopiedField(null), 1500);
+  };
+
   // Trigger Mock Check Deposit / Withdrawal
   const handleCheckDeposit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -686,6 +799,21 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     if (isNaN(amount) || amount <= 0) {
       alert(`Please enter a valid ${depositOrWithdraw === 'deposit' ? 'deposit' : 'withdrawal'} amount`);
       return;
+    }
+
+    const currentConfigs = loadDepositWithdrawConfigs();
+    const activeCfg = currentConfigs.find(c => c.id === selectedMethodId);
+    
+    if (activeCfg) {
+      const isDeposit = depositOrWithdraw === 'deposit';
+      if (isDeposit && !activeCfg.depositEnabled) {
+        alert(`This deposit method (${activeCfg.name}) is currently suspended or disabled by administrative security policies.`);
+        return;
+      }
+      if (!isDeposit && !activeCfg.withdrawEnabled) {
+        alert(`This withdrawal method (${activeCfg.name}) is currently suspended or disabled by administrative security policies.`);
+        return;
+      }
     }
 
     const allUsers = loadUsersData();
@@ -702,11 +830,30 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         }
 
         // Submitting creates a transaction with status 'pending'
+        let description = '';
+        if (selectedMethodId === 'bank') {
+          description = isDeposit 
+            ? `Bank wire deposit to ${matchAcc.name}` 
+            : `Bank wire withdrawal from ${matchAcc.name}`;
+        } else if (selectedMethodId === 'check') {
+          description = isDeposit 
+            ? `Mobile check deposit to ${matchAcc.name}` 
+            : `Check issue withdrawal from ${matchAcc.name}`;
+        } else {
+          description = isDeposit 
+            ? `Crypto (USDT) deposit to ${matchAcc.name}` 
+            : `Crypto (USDT) withdrawal from ${matchAcc.name}`;
+        }
+        
+        if (dwReference.trim()) {
+          description += ` (${dwReference.trim()})`;
+        }
+
         const newTx: Transaction = {
           id: isDeposit ? `tx-dep-${Date.now()}` : `tx-wdr-${Date.now()}`,
-          description: isDeposit ? `Mobile Deposit to ${matchAcc.name}` : `Withdrawal from ${matchAcc.name}`,
+          description,
           amount: isDeposit ? amount : -amount,
-          date: 'Just Now',
+          date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
           category: isDeposit ? 'salary' : 'transfer',
           status: 'pending',
@@ -715,12 +862,28 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
 
         allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
         saveUsersData(allUsers);
-        addAuditLog(currentUser.username, currentUser.id, isDeposit ? 'DEPOSIT' : 'WITHDRAW', `Requested ${isDeposit ? 'deposit' : 'withdrawal'} of ${formatCurrency(amount)} to/from ${matchAcc.name}. Pending administrative authorization.`);
+        
+        const actionType = isDeposit ? 'DEPOSIT' : 'WITHDRAW';
+        addAuditLog(
+          currentUser.username, 
+          currentUser.id, 
+          actionType, 
+          `Requested ${isDeposit ? 'deposit' : 'withdrawal'} of ${formatCurrency(amount)} to/from ${matchAcc.name} via ${activeCfg ? activeCfg.name : selectedMethodId}. Reference/Info: ${dwReference || 'None'}. Pending administrative authorization.`
+        );
+
+        // Dispatch Transaction Notification for requested deposit or withdrawal
+        notificationService.sendTransactionAlert(
+          allUsers[userIdx],
+          newTx.amount,
+          newTx.description + " (Awaiting Security Clearance)",
+          isDeposit ? 'credit' : 'debit'
+        ).catch(err => console.error("Error sending tx action request alert:", err));
 
         setDepositAmount('');
+        setDwReference('');
         setShowDepositModal(false);
         triggerStateRefresh();
-        alert(`Successfully requested ${depositOrWithdraw === 'deposit' ? 'deposit' : 'withdrawal'} of ${formatCurrency(amount)}. This has been sent to the admin for manual approval.`);
+        alert(`Successfully requested ${depositOrWithdraw === 'deposit' ? 'deposit' : 'withdrawal'} of ${formatCurrency(amount)} via ${activeCfg ? activeCfg.name : selectedMethodId}. This has been sent to the admin for manual approval.`);
       }
     }
   };
@@ -764,7 +927,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           id: `tx-trsf-${Date.now()}`,
           description: `Transfer to ${destAcc.name}`,
           amount: -amount,
-          date: 'Just Now',
+          date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
           category: transferCategory
         };
@@ -774,7 +937,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           id: `tx-trsf-dep-${Date.now()}`,
           description: `Transfer from ${sourceAcc.name}`,
           amount: amount,
-          date: 'Just Now',
+          date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
           category: transferCategory
         };
@@ -783,6 +946,14 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         saveUsersData(allUsers);
         addAuditLog(currentUser.username, currentUser.id, 'TRANSFER_INTERNAL', `Transferred ${formatCurrency(amount)} from ${sourceAcc.name} to ${destAcc.name}`);
         
+        // Dispatch Transaction Notification
+        notificationService.sendTransactionAlert(
+          allUsers[userIdx],
+          amount,
+          `Internal Transfer to ${destAcc.name}`,
+          'debit'
+        ).catch(err => console.error("Error sending tx alert:", err));
+
         setTransferProcessing(false);
         setTransferSuccessMsg(`Successfully completed internal transfer of ${formatCurrency(amount)}!`);
         setTransferAmount('');
@@ -812,7 +983,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           id: `tx-trsf-ext-${Date.now()}`,
           description: `Wire Payment to ${recipientName}`,
           amount: -amount,
-          date: 'Just Now',
+          date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
           category: transferCategory
         };
@@ -820,6 +991,14 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
 
         saveUsersData(allUsers);
         addAuditLog(currentUser.username, currentUser.id, 'TRANSFER_EXTERNAL', `Wired ${formatCurrency(amount)} from ${sourceAcc.name} to ${recipientName} (${recipientAccount})`);
+
+        // Dispatch Transaction Notification
+        notificationService.sendTransactionAlert(
+          allUsers[userIdx],
+          amount,
+          `External Wire to ${recipientName}`,
+          'debit'
+        ).catch(err => console.error("Error sending tx alert:", err));
 
         setTransferProcessing(false);
         setTransferSuccessMsg(`Successfully executed wire transfer of ${formatCurrency(amount)} to ${recipientName}!`);
@@ -883,7 +1062,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
             id: `tx-p2p-send-${Date.now()}`,
             description: `P2P send to @${allUsers[recipientIdx].username}`,
             amount: -amount,
-            date: 'Just Now',
+            date: formatTransactionDate(Date.now()),
             timestamp: Date.now(),
             category: 'transfer',
             status: 'successful'
@@ -894,7 +1073,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
             id: `tx-p2p-recv-${Date.now()}`,
             description: `P2P recv from @${currentUser.username}`,
             amount: amount,
-            date: 'Just Now',
+            date: formatTransactionDate(Date.now()),
             timestamp: Date.now(),
             category: 'transfer',
             status: 'successful'
@@ -904,6 +1083,21 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           saveUsersData(allUsers);
           addAuditLog(currentUser.username, currentUser.id, 'P2P_TRANSFER_SUCCESS', `Successfully sent ${formatCurrency(amount)} to @${allUsers[recipientIdx].username}`);
           addAuditLog(allUsers[recipientIdx].username, allUsers[recipientIdx].id, 'P2P_RECEIVE_SUCCESS', `Received P2P transfer of ${formatCurrency(amount)} from @${currentUser.username}`);
+
+          // Dispatch Transaction Alerts for both parties
+          notificationService.sendTransactionAlert(
+            allUsers[senderIdx],
+            amount,
+            `P2P Send to @${allUsers[recipientIdx].username}`,
+            'debit'
+          ).catch(err => console.error("Error sending p2p sender tx alert:", err));
+
+          notificationService.sendTransactionAlert(
+            allUsers[recipientIdx],
+            amount,
+            `P2P Received from @${currentUser.username}`,
+            'credit'
+          ).catch(err => console.error("Error sending p2p receiver tx alert:", err));
 
           setTransferSuccessMsg(`P2P Instant Transfer complete! Sent ${formatCurrency(amount)} to @${allUsers[recipientIdx].username}.`);
           setTransferAmount('');
@@ -991,7 +1185,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           id: `tx-bill-${Date.now()}`,
           description: `Utility Paid: ${parentBiller.name}`,
           amount: -parentBiller.amount,
-          date: 'Just Now',
+          date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
           category: 'utilities',
           status: 'successful'
@@ -1000,6 +1194,11 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         freshUsers[idx].transactions = [billTx, ...freshUsers[idx].transactions];
         saveUsersData(freshUsers);
         addAuditLog(currentUser.username, currentUser.id, 'BILL_PAY_SUCCESS', `Paid schedule bill of ${formatCurrency(parentBiller.amount)} to ${parentBiller.name}`);
+
+        // Dispatch Biller Alert
+        notificationService.sendBillerAlert(freshUsers[idx], parentBiller.name, parentBiller.amount)
+          .catch(err => console.error("Error creating bill alert notification:", err));
+
         setTransferSuccessMsg(`Payment of ${formatCurrency(parentBiller.amount)} has been successfully wired and acknowledged by ${parentBiller.name}.`);
         triggerStateRefresh();
       }
@@ -1144,7 +1343,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       id: `tx-vault-${Date.now()}`,
       description: `Funded Vault: ${goalList[goalIndex].name}`,
       amount: -amount,
-      date: 'Just Now',
+      date: formatTransactionDate(Date.now()),
       timestamp: Date.now(),
       category: 'transfer',
       status: 'successful'
@@ -1242,6 +1441,14 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       allUsers[userIdx].supportTickets!.push(newTicket);
       saveUsersData(allUsers);
       addAuditLog(currentUser.username, currentUser.id, 'DISPUTE_SUBMIT', `Filed dispute ticket for transaction: ${selectedTxForDispute.description}`);
+
+      // Dispatch Support Log Notification
+      notificationService.sendSupportTicketAlert(
+        allUsers[userIdx],
+        newTicket.id,
+        `Charge Dispute: ${newTicket.transactionDescription}`,
+        `DISPUTE SUBMITTED (Urgency: ${newTicket.urgency})`
+      ).catch(err => console.error("Error sending support ticket notification:", err));
       
       setSelectedTxForDispute(null);
       setDisputeDescription('');
@@ -1276,7 +1483,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           id: `tx-revers-${Date.now()}`,
           description: `DISPUTE REVERSAL: ${matchTkt.transactionDescription.toUpperCase()}`,
           amount: refundAmount,
-          date: 'Just Now',
+          date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
           category: 'other',
           status: 'successful'
@@ -1285,6 +1492,13 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         freshUsers[idx].transactions = [creditTx, ...freshUsers[idx].transactions];
         saveUsersData(freshUsers);
         addAuditLog(currentUser.username, currentUser.id, 'DISPUTE_REVERSED', `Refunded ${formatCurrency(refundAmount)} for ticket ${ticketId}`);
+
+        // Dispatch Refund and Resolved Ticket Notifications
+        notificationService.sendTransactionAlert(freshUsers[idx], refundAmount, `DISPUTE REVERSAL CONFIRMED: ${matchTkt.transactionDescription.toUpperCase()}`, 'credit')
+          .catch(err => console.error("Error sending refund transaction alert:", err));
+        notificationService.sendSupportTicketAlert(freshUsers[idx], ticketId, `Charge Dispute: ${matchTkt.transactionDescription}`, 'PROVISIONAL DISPUTE GRANTED & FUNDS CREDITED')
+          .catch(err => console.error("Error sending resolved ticket alert:", err));
+
         alert(`Dispute provisional credit approved! ${formatCurrency(refundAmount)} has been added back to your Checking ledger.`);
         triggerStateRefresh();
       }
@@ -1301,6 +1515,26 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         card.isFrozen = !card.isFrozen;
         saveUsersData(allUsers);
         addAuditLog(currentUser.username, currentUser.id, 'CARD_FREEZE_TOGGLE', `Card ending in ${card.cardNumber.slice(-4)} ${card.isFrozen ? 'FROZEN' : 'UNFROZEN'}`);
+
+        // Dispatch Card Freeze Notification
+        const stateStr = card.isFrozen ? 'FROZEN' : 'UNFROZEN';
+        notificationService.triggerActivityAlert(
+          allUsers[userIdx],
+          'security',
+          `💳 Card Status Altered: ${stateStr}`,
+          `Secure lock has been altered on card ending in *${card.cardNumber.slice(-4)} to state: ${stateStr.toLowerCase()}.`,
+          {
+            paragraphs: [
+              `Card gateway node successfully received your instructions.`,
+              `💳 <strong>Hardware Status:</strong> Blocked/Frozen set to ${card.isFrozen ? "TRUE" : "FALSE"}`,
+              `⏰ <strong>Event Timestamp:</strong> ${new Date().toLocaleString()}`,
+              card.isFrozen 
+                ? "All active routing attempts linked to this visual token are suspended until you unfreeze." 
+                : "Standard validation clearance is restored on this card token."
+            ]
+          }
+        ).catch(err => console.error("Card freeze notification dispatch error:", err));
+
         triggerStateRefresh();
       }
     }
@@ -1628,12 +1862,112 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         </div>
 
         {/* Action controls (Bell, Message, Profile Avatar) */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 animate-fade-in">
+          
+          {/* Real-time Clock & Timezone Selector */}
+          <div className="relative font-sans shrink-0">
+            <button
+              onClick={() => setShowTzDropdown(!showTzDropdown)}
+              className="bg-slate-900 border border-slate-800 hover:border-slate-700 py-1.5 px-3 rounded-xl flex items-center gap-2 transition cursor-pointer text-left focus:outline-none hover:bg-slate-800/60 shadow-xs"
+              title="Select Ledger Timezone"
+              id="timezone-clock-btn"
+            >
+              <div className="flex flex-col">
+                <span className="text-[9px] font-bold font-mono tracking-wider text-indigo-400 uppercase flex items-center gap-1 leading-none">
+                  <span className="relative flex h-1.5 w-1.5 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                  </span>
+                  {selectedTimezone === 'auto' ? 'LOCAL TIME' : TIMEZONES.find(t => t.id === selectedTimezone)?.offset.split(' (')[0]}
+                </span>
+                <span className="text-xs font-black font-mono text-white mt-1 leading-none">
+                  {currentHeaderTime.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    timeZone: selectedTimezone === 'auto' ? undefined : selectedTimezone,
+                  })}
+                </span>
+              </div>
+              <span className="text-sm shrink-0">
+                {selectedTimezone === 'auto' ? '🌐' : TIMEZONES.find(t => t.id === selectedTimezone)?.flag}
+              </span>
+            </button>
+
+            {showTzDropdown && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40 bg-transparent" 
+                  onClick={() => setShowTzDropdown(false)} 
+                />
+                <div className="absolute right-0 mt-2 w-64 bg-[#090e24]/95 backdrop-blur-md border border-slate-800 rounded-2xl shadow-2xl p-2.5 z-50 animate-fade-in text-left">
+                  <div className="px-2 pb-1.5 mb-1.5 border-b border-indigo-950/40">
+                    <span className="text-[9px] font-bold font-mono text-indigo-400 uppercase tracking-widest block">Ledger Sync Location</span>
+                    <span className="text-[10px] text-slate-500 block">All clocks & transaction dates align with region</span>
+                  </div>
+                  <div className="max-h-56 overflow-y-auto space-y-1 pr-1 font-sans">
+                    {TIMEZONES.map((tz) => (
+                      <button
+                        key={tz.id}
+                        type="button"
+                        onClick={() => {
+                          localStorage.setItem('user_timezone', tz.id);
+                          setSelectedTimezone(tz.id);
+                          setShowTzDropdown(false);
+                          
+                          // Auto update profile residing country on change
+                          if (tz.id === 'Africa/Lagos') {
+                            setProfileCountry('Nigeria');
+                          } else if (tz.id === 'America/New_York') {
+                            setProfileCountry('United States');
+                          } else if (tz.id === 'Europe/London') {
+                            setProfileCountry('United Kingdom');
+                          } else if (tz.id === 'Europe/Paris') {
+                            setProfileCountry('France');
+                          } else if (tz.id === 'Asia/Dubai') {
+                            setProfileCountry('UAE');
+                          } else if (tz.id === 'Asia/Singapore') {
+                            setProfileCountry('Singapore');
+                          }
+                          
+                          // Force updates
+                          window.dispatchEvent(new Event('timezone-changed'));
+                        }}
+                        className={`w-full text-left px-2 border-none py-1.5 rounded-lg flex items-center justify-between transition cursor-pointer text-xs ${
+                          selectedTimezone === tz.id 
+                            ? 'bg-blue-600/20 border border-blue-500/30 text-blue-400 font-bold' 
+                            : 'text-slate-300 hover:bg-slate-800/40'
+                        }`}
+                      >
+                        <div className="flex flex-col pr-1">
+                          <span className="font-semibold text-[11px] leading-tight">{tz.label}</span>
+                          <span className="text-[9px] text-slate-500 font-mono mt-0.5">{tz.offset}</span>
+                        </div>
+                        <span className="text-sm shrink-0">{tz.id === 'auto' ? '🌐' : tz.flag}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
           
           {/* Notifications Trigger */}
           <div className="relative">
             <button 
-              onClick={() => setShowNotifications(!showNotifications)}
+              onClick={() => {
+                setShowNotifications(!showNotifications);
+                // Clear the unread count on opening the container
+                if (!showNotifications && currentUser.unreadNotifications > 0) {
+                  const allUsers = loadUsersData();
+                  const idx = allUsers.findIndex(u => u.id === currentUser.id);
+                  if (idx !== -1) {
+                    allUsers[idx].unreadNotifications = 0;
+                    saveUsersData(allUsers);
+                    triggerStateRefresh();
+                  }
+                }
+              }}
               className="w-10 h-10 rounded-xl bg-white border border-slate-200 flex items-center justify-center hover:bg-slate-50 transition relative text-slate-500 hover:text-indigo-600 cursor-pointer shadow-xs"
               id="btn-bell-badge"
             >
@@ -1646,19 +1980,155 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
             </button>
 
             {showNotifications && (
-              <div className="absolute right-0 mt-2.5 w-72 bg-white border border-slate-200 rounded-2xl p-4 shadow-xl z-50 text-slate-800">
-                <div className="flex justify-between items-center mb-2.5 border-b border-slate-100 pb-2">
-                  <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">Unread Alerts</span>
-                  <span className="text-[10px] font-mono text-indigo-600 font-bold">Live feed</span>
-                </div>
-                <div className="space-y-2.5">
-                  <div className="text-xs text-slate-600 border-l-2 border-green-500 pl-2">
-                    <p className="font-extrabold text-slate-800">Deposit Confirmed</p>
-                    <p className="text-[10px] text-slate-500 font-sans leading-normal">+$38,250.00 base salary successfully credited to checking.</p>
+              <div className="fixed inset-x-4 top-20 md:absolute md:top-auto md:inset-x-auto md:right-0 md:mt-3 w-auto md:w-[400px] max-w-full bg-white border border-slate-200 rounded-2xl p-4 shadow-2xl z-[100] text-slate-800 animate-slide-down text-left">
+                {/* Header title block */}
+                <div className="flex justify-between items-center pb-2.5 border-b border-slate-100">
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Secure Alert Gateway</h4>
+                    <span className="text-[9px] text-slate-500 font-mono">Unitycore Cryptographic Node</span>
                   </div>
-                  <div className="text-xs text-slate-600 border-l-2 border-indigo-505 border-indigo-500 pl-2">
-                    <p className="font-extrabold text-slate-800">Security Shield Active</p>
-                    <p className="text-[10px] text-slate-500 font-sans leading-normal">Connected successfully on May 27, 2026 UTC.</p>
+                  <button 
+                    onClick={() => {
+                      const allUsers = loadUsersData();
+                      const idx = allUsers.findIndex(u => u.id === currentUser.id);
+                      if (idx !== -1) {
+                        allUsers[idx].notifications = [];
+                        allUsers[idx].unreadNotifications = 0;
+                        saveUsersData(allUsers);
+                        triggerStateRefresh();
+                      }
+                    }}
+                    className="text-[10px] font-bold text-red-500 hover:text-red-600 hover:underline cursor-pointer"
+                  >
+                    Clear Logs
+                  </button>
+                </div>
+
+                {/* Tabs selection layout */}
+                <div className="flex gap-1.5 bg-slate-55 bg-slate-100 p-1 rounded-lg mt-2.5">
+                  <button 
+                    onClick={() => setNotificationInboxFilter('all')}
+                    className={`flex-1 py-1.5 text-[10px] font-extrabold rounded-md text-center transition cursor-pointer ${
+                      notificationInboxFilter === 'all' 
+                        ? 'bg-white text-indigo-600 shadow-xs' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    All Accounts
+                  </button>
+                  <button 
+                    onClick={() => setNotificationInboxFilter('push')}
+                    className={`flex-1 py-1.5 text-[10px] font-extrabold rounded-md text-center transition cursor-pointer ${
+                      notificationInboxFilter === 'push' 
+                        ? 'bg-white text-indigo-600 shadow-xs' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    📱 Push Alerts
+                  </button>
+                  <button 
+                    onClick={() => setNotificationInboxFilter('email')}
+                    className={`flex-1 py-1.5 text-[10px] font-extrabold rounded-md text-center transition cursor-pointer ${
+                      notificationInboxFilter === 'email' 
+                        ? 'bg-white text-indigo-600 shadow-xs' 
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    📨 Mails
+                  </button>
+                </div>
+
+                {/* Notifications Scrollable Content Area */}
+                <div className="max-h-[260px] overflow-y-auto mt-3 pr-0.5 space-y-2.5">
+                  {(() => {
+                    const items = currentUser.notifications || [];
+                    const filtered = items.filter(n => {
+                      if (notificationInboxFilter === 'all') return true;
+                      return n.type === notificationInboxFilter;
+                    });
+
+                    if (filtered.length === 0) {
+                      return (
+                        <div className="py-8 text-center space-y-1">
+                          <p className="text-[11px] text-slate-400 font-medium">📬 Secure inbox idle.</p>
+                          <p className="text-[9px] text-slate-400">Trigger custom simulated actions below to test notifications instantly!</p>
+                        </div>
+                      );
+                    }
+
+                    return filtered.map((notif) => {
+                      if (notif.type === 'push') {
+                        // Render Mobile Device push log
+                        return (
+                          <div 
+                            key={notif.id} 
+                            className="bg-slate-50/70 border border-slate-100 rounded-xl p-2.5 hover:bg-slate-50 transition relative text-left"
+                          >
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="text-[8px] font-mono uppercase bg-indigo-50 border border-indigo-100 text-indigo-600 px-1 py-0.5 rounded">
+                                {notif.category} alert
+                              </span>
+                              <span className="text-[8px] font-mono text-slate-400">
+                                {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone === 'auto' ? undefined : selectedTimezone })}
+                              </span>
+                            </div>
+                            <h5 className="text-[11px] font-extrabold text-slate-800 mt-1">{notif.title}</h5>
+                            <p className="text-[10px] text-slate-500 mt-0.5 leading-normal">{notif.body}</p>
+                          </div>
+                        );
+                      } else {
+                        // Render Secure Decryptable Webmail list item
+                        return (
+                          <div 
+                            key={notif.id}
+                            onClick={() => setSelectedEmailForViewer(notif)}
+                            className="border border-slate-100 hover:border-blue-400/30 rounded-xl p-2.5 hover:bg-slate-50/40 transition cursor-pointer relative text-left bg-gradient-to-r from-blue-50/10 to-transparent"
+                          >
+                            <div className="flex justify-between items-center gap-2">
+                              <span className="text-[8px] font-mono uppercase bg-blue-50 text-blue-600 border border-blue-100 px-1 py-0.5 rounded font-bold">
+                                🔐 crypt-mail read
+                              </span>
+                              <span className="text-[8px] font-mono text-slate-400">
+                                {new Date(notif.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', timeZone: selectedTimezone === 'auto' ? undefined : selectedTimezone })}
+                              </span>
+                            </div>
+                            <h5 className="text-[11px] font-extrabold text-indigo-900 mt-1 leading-normal truncate">{notif.title}</h5>
+                            <p className="text-[9px] text-indigo-600 font-semibold mt-0.5">🔓 Click to view decrypted visual e-mail HTML →</p>
+                          </div>
+                        );
+                      }
+                    });
+                  })()}
+                </div>
+
+                {/* Secure action simulators playground list (Interactive control panel element) */}
+                <div className="border-t border-slate-100 pt-3.5 mt-3">
+                  <span className="text-[9px] font-mono font-bold text-slate-400 uppercase tracking-widest block mb-1.5 text-center">Simulate Test Activities</span>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button 
+                      onClick={() => {
+                        notificationService.sendLoginAlert(currentUser).catch(err => console.error(err));
+                      }}
+                      className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[9px] font-semibold text-slate-200 py-1 rounded cursor-pointer transition text-center shadow-xs"
+                    >
+                      🌐 Login Alert
+                    </button>
+                    <button 
+                      onClick={() => {
+                        notificationService.sendTransactionAlert(currentUser, 15.99, "Starbucks London UK Coffee", "debit").catch(err => console.error(err));
+                      }}
+                      className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[9px] font-semibold text-slate-200 py-1 rounded cursor-pointer transition text-center shadow-xs"
+                    >
+                      💸 Spent Alert
+                    </button>
+                    <button 
+                      onClick={() => {
+                        notificationService.sendOtpAuthenticationCode(currentUser, "Direct Wire Transfer Clearance", "5039").catch(err => console.error(err));
+                      }}
+                      className="bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[9px] font-semibold text-slate-200 py-1 rounded cursor-pointer transition text-center shadow-xs"
+                    >
+                      🔒 OTP Alert
+                    </button>
                   </div>
                 </div>
               </div>
@@ -1785,7 +2255,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                             {tx.description}
                           </p>
                           <p className="text-xs text-slate-400 font-mono mt-0.5 flex flex-wrap items-center gap-1.5">
-                            <span>{tx.date}</span>
+                            <span>{formatTransactionDate(tx.timestamp || tx.date)}</span>
                             <span className="inline-block px-1.5 py-0.5 rounded-md bg-slate-50 border border-slate-200/60 font-sans font-bold uppercase text-[9px] tracking-wider text-slate-500">
                               {tx.category}
                             </span>
@@ -1973,7 +2443,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                                   {tx.description}
                                 </p>
                                 <p className="text-[10px] text-slate-400 font-mono mt-0.5 flex flex-wrap items-center gap-1.5">
-                                  <span>{tx.date}</span>
+                                  <span>{formatTransactionDate(tx.timestamp || tx.date)}</span>
                                   <span className="inline-block px-1 py-0.2 rounded-md bg-slate-50 border border-slate-200/60 font-sans font-bold uppercase text-[8px] tracking-wider text-slate-500">
                                     {tx.category}
                                   </span>
@@ -3656,7 +4126,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                           </div>
                           <div>
                             <p className="text-xs font-bold text-white leading-normal">{tx.description}</p>
-                            <p className="text-[10px] text-slate-500 font-mono mt-0.5">{tx.date || 'Today'}</p>
+                             <p className="text-[10px] text-slate-500 font-mono mt-0.5">{formatTransactionDate(tx.timestamp || tx.date)}</p>
                           </div>
                         </div>
                         <div className="text-right">
@@ -3722,7 +4192,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                         id: `tx-swift-${Date.now()}`,
                         description: `SWIFT WIRE / TO: ${wireBeneficiary} [${wireCountry.toUpperCase()}]`,
                         amount: -amount,
-                        date: 'Just Now',
+                        date: formatTransactionDate(Date.now()),
                         timestamp: Date.now(),
                         category: 'transfer'
                       };
@@ -3731,7 +4201,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                         id: `tx-swift-fee-${Date.now()}`,
                         description: `SWIFT CROSS-BORDER COMMISSION FEE`,
                         amount: -15,
-                        date: 'Just Now',
+                        date: formatTransactionDate(Date.now()),
                         timestamp: Date.now(),
                         category: 'other'
                       };
@@ -3887,192 +4357,286 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           </div>
         )}
 
-        {/* TAB 8: HIGH-FIDELITY MOBILE CHECK DEPOSIT */}
-        {activeTab === 'deposit' && (
-          <div className="space-y-6 animate-fade-in max-w-sm mx-auto text-left pb-8">
-            <div>
-              <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase tracking-wider">Mobile Imaging</span>
-              <h2 className="text-xl font-bold text-white tracking-tight mt-0.5">Mobile Check Deposit</h2>
-              <p className="text-xs text-slate-400">Scan front & back endorsements for high speed automated sandbox ledger clearing.</p>
-            </div>
-
-            {depositReportMsg && (
-              <div className="bg-[#064e3b] border border-[#10b981] text-[#34d399] text-xs p-4 rounded-xl flex items-start gap-2.5 shadow-lg">
-                <CheckCircle className="w-5 h-5 shrink-0" />
-                <div>
-                  <h4 className="font-bold">Instant Sandbox Credit Clearance</h4>
-                  <p className="text-[11px] text-[#a7f3d0] mt-1">{depositReportMsg}</p>
-                </div>
+        {/* TAB 8: HIGH-FIDELITY DEPOSIT & WITHDRAWAL SETTLEMENT CENTER */}
+        {activeTab === 'deposit' && (() => {
+          const activeCfg = dwConfigs.find(c => c.id === selectedMethodId);
+          const isDeposit = depositOrWithdraw === 'deposit';
+          const isEnabled = activeCfg ? (isDeposit ? activeCfg.depositEnabled : activeCfg.withdrawEnabled) : true;
+          
+          return (
+            <div className="space-y-6 animate-fade-in max-w-md mx-auto text-left pb-8">
+              <div>
+                <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase tracking-wider">Settlement Node</span>
+                <h2 className="text-xl font-bold text-white tracking-tight mt-0.5 animate-pulse-slow">Deposit & Withdrawal Hub</h2>
+                <p className="text-xs text-slate-400 font-sans">Request account deposits or initiate secure withdrawals across bank wires, checks, and crypto networks.</p>
               </div>
-            )}
 
-            <div className="bg-[#0d1224] border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
-              <form onSubmit={(e) => {
-                e.preventDefault();
-                const amount = parseFloat(depositAmount);
-                if (isNaN(amount) || amount <= 0) {
-                  alert('Please enter a valid check amount to deposit');
-                  return;
-                }
-                if (!depositFrontCaptured || !depositBackCaptured) {
-                  alert('Please simulate scanning BOTH the front and back of the check to clear security policies.');
-                  return;
-                }
-
-                setDepositProcessingState(true);
-                setTimeout(() => {
-                  const allUsers = loadUsersData();
-                  const userIdx = allUsers.findIndex(u => u.id === currentUser.id);
-                  if (userIdx !== -1) {
-                    const matchAcc = allUsers[userIdx].accounts.find(a => a.id === depositTarget);
-                    if (matchAcc) {
-                      const newTx: Transaction = {
-                        id: `tx-checkdep-${Date.now()}`,
-                        description: `Mobile Check Deposit #${depositCheckNumber || '39485'}`,
-                        amount: amount,
-                        date: 'Just Now',
-                        timestamp: Date.now(),
-                        category: 'other',
-                        status: 'pending',
-                        targetAccountId: matchAcc.id
-                      };
-
-                      allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
-                      saveUsersData(allUsers);
-                      addAuditLog(currentUser.username, currentUser.id, 'DEPOSIT', `Scanned and submitted mobile check #${depositCheckNumber || '39485'} worth ${formatCurrency(amount)}. Submitted for administrative approval.`);
-                      
-                      triggerStateRefresh();
-                      setDepositReportMsg(`Standard sandbox audit finalized. Mobile check of ${formatCurrency(amount)} has been submitted. It is now awaiting manual administrator review and approval before clearance.`);
-                      setDepositAmount('');
-                      setDepositCheckNumber('');
-                      setDepositFrontCaptured(false);
-                      setDepositBackCaptured(false);
-                    }
-                  }
-                  setDepositProcessingState(false);
-                }, 1500);
-              }} className="space-y-3.5">
-
-                <div className="space-y-1">
-                  <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase">Target Account</span>
-                  <select 
-                    value={depositTarget}
-                    onChange={(e) => setDepositTarget(e.target.value)}
-                    className="w-full bg-[#080c18] border border-slate-800 rounded-xl py-2.5 px-3.5 text-xs focus:border-blue-500 text-white"
-                  >
-                    {currentUser.accounts.map(a => (
-                      <option key={a.id} value={a.id}>{a.name} ({formatCurrency(a.balance)} available)</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase">Check Amount ($)</span>
-                    <input
-                      type="number"
-                      required
-                      placeholder="e.g. 4500.00"
-                      value={depositAmount}
-                      onChange={(e) => setDepositAmount(e.target.value)}
-                      className="w-full bg-[#080c18] border border-slate-800 rounded-xl py-2.5 px-3.5 text-xs text-white font-mono placeholder:text-slate-600 outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase">Check Number #</span>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. 59204"
-                      value={depositCheckNumber}
-                      onChange={(e) => setDepositCheckNumber(e.target.value)}
-                      className="w-full bg-[#080c18] border border-slate-800 rounded-xl py-2.5 px-3.5 text-xs text-white font-mono placeholder:text-slate-600 outline-none focus:border-blue-500"
-                    />
+              {depositReportMsg && (
+                <div className="bg-[#064e3b] border border-[#10b981] text-[#34d399] text-xs p-4 rounded-xl flex items-start gap-2.5 shadow-lg font-sans">
+                  <CheckCircle className="w-5 h-5 shrink-0 animate-bounce" />
+                  <div>
+                    <h4 className="font-bold">Sandbox Action Recorded</h4>
+                    <p className="text-[11px] text-[#a7f3d0] mt-1">{depositReportMsg}</p>
                   </div>
                 </div>
+              )}
 
-                {/* Scan buttons simulating camera and OCR validations */}
-                <span className="text-[10.5px] text-indigo-400 font-bold uppercase font-sans">Check Scan Dual Capture System</span>
-                <div className="grid grid-cols-2 gap-3.5">
-                  <div 
-                    onClick={() => {
-                      if (!depositAmount) {
-                        alert('Please fill in the check amount first to validate OCR scanning parameters.');
-                        return;
-                      }
-                      setDepositFrontCaptured(true);
-                    }}
-                    className={`border border-dashed h-24 rounded-xl flex flex-col items-center justify-center p-2 cursor-pointer transition text-center ${
-                      depositFrontCaptured 
-                        ? 'bg-emerald-500/10 border-emerald-450 text-[#34d399]' 
-                        : 'bg-[#080c18] border-slate-800 hover:border-slate-650 text-slate-400'
-                    }`}
-                  >
-                    {depositFrontCaptured ? (
-                      <>
-                        <CheckCircle className="w-5 h-5 text-[#34d399] mb-1" />
-                        <span className="text-[10px] font-bold">FRONT CAPTURED</span>
-                        <span className="text-[8px] opacity-75">OCR verified: ${parseFloat(depositAmount).toLocaleString()}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Smartphone className="w-5 h-5 mb-1 text-slate-500" />
-                        <span className="text-[10px] font-bold">Image Front Check</span>
-                        <span className="text-[8px] text-slate-500">Auto Endorsement scan</span>
-                      </>
-                    )}
-                  </div>
-
-                  <div 
-                    onClick={() => {
-                      if (!depositFrontCaptured) {
-                        alert('Please scan the front of the check first.');
-                        return;
-                      }
-                      setDepositBackCaptured(true);
-                    }}
-                    className={`border border-dashed h-24 rounded-xl flex flex-col items-center justify-center p-2 cursor-pointer transition text-center ${
-                      depositBackCaptured 
-                        ? 'bg-emerald-500/10 border-emerald-450 text-[#34d399]' 
-                        : 'bg-[#080c18] border-slate-800 hover:border-slate-650 text-slate-400'
-                    }`}
-                  >
-                    {depositBackCaptured ? (
-                      <>
-                        <CheckCircle className="w-5 h-5 text-[#34d399] mb-1" />
-                        <span className="text-[10px] font-bold">BACK CAPTURED</span>
-                        <span className="text-[8px] opacity-75">Signature matched (100%)</span>
-                      </>
-                    ) : (
-                      <>
-                        <Smartphone className="w-5 h-5 mb-1 text-slate-500" />
-                        <span className="text-[10px] font-bold">Image Back Check</span>
-                        <span className="text-[8px] text-slate-500">Endorse with signature</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-
+              {/* Action and Network Tabs */}
+              <div className="grid grid-cols-2 gap-2 bg-[#090d1e] p-1 rounded-xl border border-slate-800">
                 <button
-                  type="submit"
-                  disabled={depositProcessingState}
-                  className="w-full bg-[#5c4fff] hover:bg-[#4d3df2] font-sans text-xs font-bold py-3.5 px-4 rounded-xl text-white transition flex items-center justify-center gap-2 cursor-pointer shadow-md"
+                  type="button"
+                  onClick={() => {
+                    setDepositOrWithdraw('deposit');
+                    setDepositReportMsg('');
+                  }}
+                  className={`py-2 text-center text-xs font-bold rounded-lg transition border-none cursor-pointer ${
+                    isDeposit 
+                      ? 'bg-blue-600 text-white shadow-md' 
+                      : 'text-slate-400 hover:text-white bg-transparent'
+                  }`}
                 >
-                  {depositProcessingState ? (
-                    <span className="flex items-center gap-2">
-                      <RefreshCw className="w-4 h-4 animate-spin" /> Verifying FDIC routing sequence...
-                    </span>
-                  ) : (
-                    <>
-                      <span>Submit Check For Instant Settlement</span>
-                      <CheckCircle className="w-4 h-4" />
-                    </>
-                  )}
+                  🏦 Deposit Option
                 </button>
-              </form>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDepositOrWithdraw('withdraw');
+                    setDepositReportMsg('');
+                  }}
+                  className={`py-2 text-center text-xs font-bold rounded-lg transition border-none cursor-pointer ${
+                    !isDeposit 
+                      ? 'bg-blue-600 text-white shadow-md' 
+                      : 'text-slate-400 hover:text-white bg-transparent'
+                  }`}
+                >
+                  📤 Withdrawal Option
+                </button>
+              </div>
+
+              {/* Selector Tabs for network channels */}
+              <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#090d1e] rounded-xl border border-slate-800 select-none">
+                {([
+                  { id: 'bank', name: '🏦 Bank Wire' },
+                  { id: 'check', name: '📝 Check Scan' },
+                  { id: 'crypto', name: '🪙 USD-Crypto' }
+                ] as const).map((method) => {
+                  const cfgObj = dwConfigs.find(c => c.id === method.id);
+                  const isChEnabled = cfgObj ? (isDeposit ? cfgObj.depositEnabled : cfgObj.withdrawEnabled) : true;
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedMethodId(method.id);
+                        setDepositReportMsg('');
+                      }}
+                      className={`py-2.5 px-0.5 text-[10px] font-extrabold rounded-lg transition text-center cursor-pointer border-none flex items-center justify-center gap-1.5 relative ${
+                        selectedMethodId === method.id
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+                          : 'text-slate-400 hover:bg-slate-800 hover:text-white bg-transparent'
+                      }`}
+                    >
+                      <span>{method.name}</span>
+                      <span className={`w-1.5 h-1.5 rounded-full ${isChEnabled ? 'bg-emerald-500' : 'bg-rose-500'}`} title={isChEnabled ? "Channel enabled" : "Channel paused"} />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Main content pane */}
+              <div className="bg-[#0c1022] border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4 text-white">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <span className="text-xs font-bold tracking-wider text-indigo-400 uppercase">
+                    Channel: {activeCfg ? activeCfg.name : selectedMethodId}
+                  </span>
+                  <span className={`text-[9px] font-bold font-mono px-2 py-0.5 rounded border uppercase shrink-0 ${
+                    isEnabled 
+                      ? 'text-emerald-400 bg-emerald-950/40 border-emerald-800/60' 
+                      : 'text-rose-400 bg-rose-950/40 border-rose-800/60'
+                  }`}>
+                    {isEnabled ? 'System Config Active' : 'Administrative Suspension'}
+                  </span>
+                </div>
+
+                {/* Administrator instructions */}
+                <div className="bg-[#050814] p-3.5 rounded-xl border border-slate-800/80 space-y-2.5 leading-relaxed">
+                  <span className="text-[9px] text-slate-500 block uppercase font-mono font-bold">Admin Clearance Instructions</span>
+                  <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap font-sans">
+                    {activeCfg ? (isDeposit ? activeCfg.depositInstructions : activeCfg.withdrawInstructions) : 'No instructions provided.'}
+                  </p>
+
+                  {/* Specification details copy layout */}
+                  {isDeposit && isEnabled && activeCfg && Object.keys(activeCfg.depositFields).length > 0 && (
+                    <div className="pt-2 border-t border-slate-800 text-left space-y-1.5">
+                      <span className="text-[9px] text-[#f87171] uppercase font-bold tracking-wide block">Dynamic Deposit Details (Click to copy):</span>
+                      <div className="space-y-1.5">
+                        {Object.entries(activeCfg.depositFields).map(([fKey, fVal]) => {
+                          const parsedVal = (fVal as string).replace('{username}', currentUser.username);
+                          return (
+                            <div 
+                              key={fKey}
+                              onClick={() => handleCopy(parsedVal, fKey)}
+                              className="bg-[#080c1b] hover:bg-[#0f152d] hover:border-slate-650 p-2 rounded-lg border border-slate-800 cursor-pointer text-xs flex justify-between items-center transition"
+                            >
+                              <div className="truncate pr-2 text-left">
+                                <span className="text-[8px] text-slate-500 uppercase block font-bold">{fKey}</span>
+                                <span className="font-mono text-slate-200 select-all font-bold">{parsedVal}</span>
+                              </div>
+                              <span className="text-[9px] font-mono font-semibold text-indigo-400 bg-indigo-950/50 border border-indigo-900/60 px-1.5 py-0.5 rounded shrink-0">
+                                {copiedField === fKey ? 'Copied ✅' : 'Copy'}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {!isEnabled ? (
+                  <div className="bg-rose-950/30 border border-rose-800/60 rounded-xl p-4 text-center text-rose-305 text-xs text-rose-300 font-sans leading-relaxed">
+                    ⚠️ This payment channel is suspended by administrative security policies. Please contact physical system desk services to arrange manual ledger clearance.
+                  </div>
+                ) : (
+                  <form onSubmit={handleCheckDeposit} className="space-y-4">
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-indigo-block text-indigo-400 font-mono font-bold uppercase block">
+                        {isDeposit ? 'Destination Savings Ledger' : 'Source Dispersal Ledger'}
+                      </span>
+                      <select 
+                        value={depositTarget}
+                        onChange={(e) => setDepositTarget(e.target.value)}
+                        className="w-full bg-[#080c18] border border-slate-800 rounded-xl py-2.5 px-3 text-xs focus:border-indigo-500 text-white outline-none font-bold"
+                      >
+                        {currentUser.accounts.map(a => (
+                          <option key={a.id} value={a.id} className="bg-slate-950 text-white">{a.name} ({formatCurrency(a.balance)} available)</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase block">Transfer Funds Amount ($ USD)</span>
+                      <input
+                        type="number"
+                        required
+                        min={1}
+                        step="any"
+                        placeholder="e.g. 1000.00"
+                        value={depositAmount}
+                        onChange={(e) => setDepositAmount(e.target.value)}
+                        className="w-full bg-[#080c18] border border-slate-800 rounded-xl py-2.5 px-3.5 text-xs text-white font-mono placeholder:text-slate-600 outline-none focus:border-indigo-500 font-bold"
+                      />
+                    </div>
+
+                    {/* Integrated check-scans interface ONLY if method id is check & user is depositing */}
+                    {selectedMethodId === 'check' && isDeposit && (
+                      <div className="space-y-3 pt-2">
+                        <span className="text-[10px] text-indigo-400 font-bold uppercase font-sans block">Check Scan Dual Capture System</span>
+                        
+                        <div className="grid grid-cols-2 gap-3">
+                          <div 
+                            onClick={() => {
+                              if (!depositAmount) {
+                                alert('Please fill in the check amount first to validate OCR scanning parameters.');
+                                return;
+                              }
+                              setDepositFrontCaptured(true);
+                            }}
+                            className={`border border-dashed h-22 rounded-xl flex flex-col items-center justify-center p-2 cursor-pointer transition text-center ${
+                              depositFrontCaptured 
+                                ? 'bg-emerald-500/10 border-emerald-450 text-[#34d399]' 
+                                : 'bg-[#080c18] border-slate-800 hover:border-slate-650 text-slate-400'
+                            }`}
+                          >
+                            {depositFrontCaptured ? (
+                              <>
+                                <CheckCircle className="w-4 h-4 text-[#34d399] mb-1 animate-pulse" />
+                                <span className="text-[9px] font-bold text-emerald-400">FRONT CAPTURED</span>
+                                <span className="text-[8px] text-slate-400">OCR verified</span>
+                              </>
+                            ) : (
+                              <>
+                                <Smartphone className="w-4 h-4 mb-1 text-slate-500" />
+                                <span className="text-[9px] font-bold">Scan Front Check</span>
+                                <span className="text-[8px] text-slate-500 font-sans">Endorsement capture</span>
+                              </>
+                            )}
+                          </div>
+
+                          <div 
+                            onClick={() => {
+                              if (!depositFrontCaptured) {
+                                alert('Please scan the front of the check first.');
+                                return;
+                              }
+                              setDepositBackCaptured(true);
+                            }}
+                            className={`border border-dashed h-22 rounded-xl flex flex-col items-center justify-center p-2 cursor-pointer transition text-center ${
+                              depositBackCaptured 
+                                ? 'bg-emerald-500/10 border-emerald-450 text-[#34d399]' 
+                                : 'bg-[#080c18] border-slate-800 hover:border-slate-650 text-slate-400'
+                            }`}
+                          >
+                            {depositBackCaptured ? (
+                              <>
+                                <CheckCircle className="w-4 h-4 text-[#34d399] mb-1 animate-pulse" />
+                                <span className="text-[9px] font-bold text-emerald-400">BACK CAPTURED</span>
+                                <span className="text-[8px] text-slate-400">Signature matched</span>
+                              </>
+                            ) : (
+                              <>
+                                <Smartphone className="w-4 h-4 mb-1 text-slate-500" />
+                                <span className="text-[9px] font-bold">Scan Back Check</span>
+                                <span className="text-[8px] text-slate-500 font-sans">Endorsement signature</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase block">
+                        {selectedMethodId === 'bank' 
+                          ? (isDeposit ? 'Your Depositing Bank / Wire Reference' : 'Recipient Bank Account IBAN / BIC Code') 
+                          : selectedMethodId === 'check'
+                            ? 'Check Serial Identifier'
+                            : (isDeposit ? 'Your Transfer Wallet Hash / TXID Index' : 'External Recipient USDT/Crypto Wallet Address')}
+                      </span>
+                      <input
+                        type="text"
+                        required
+                        placeholder={
+                          selectedMethodId === 'bank' 
+                            ? (isDeposit ? 'e.g. Wire index #9305-Chase' : 'IBAN DE89 3704 0044...')
+                            : selectedMethodId === 'check'
+                              ? 'e.g. Check #2948194'
+                              : (isDeposit ? 'e.g. TXID: e04cf92b8d...' : 'USDT TRC20 Wallet address...')
+                        }
+                        value={dwReference}
+                        onChange={(e) => setDwReference(e.target.value)}
+                        className="w-full bg-[#080c18] border border-slate-800 rounded-xl py-2.5 px-3.5 text-xs text-white font-mono placeholder:text-slate-600 outline-none focus:border-indigo-500 font-bold"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={selectedMethodId === 'check' && isDeposit && (!depositFrontCaptured || !depositBackCaptured)}
+                      className={`w-full font-sans text-xs font-bold py-3.5 px-4 rounded-xl text-white transition flex items-center justify-center gap-2 cursor-pointer shadow-md ${
+                        selectedMethodId === 'check' && isDeposit && (!depositFrontCaptured || !depositBackCaptured)
+                          ? 'bg-slate-800 text-slate-600 cursor-not-allowed border-none'
+                          : 'bg-indigo-600 hover:bg-indigo-705 hover:bg-indigo-750 border-none bg-blue-600 hover:bg-blue-700'
+                      }`}
+                    >
+                      <span>Submit {isDeposit ? 'Deposit' : 'Withdrawal'} Clearance</span>
+                      <ArrowUpRight className="w-4 h-4" />
+                    </button>
+                  </form>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* TAB 9: LOAN DESK APPLICATION HUB */}
         {activeTab === 'loan' && (
@@ -4116,7 +4680,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                         id: `tx-loan-${Date.now()}`,
                         description: `UNITYCORE CREDIT UNION: LOAN DISBURSEMENT - PRE-APPROVED`,
                         amount: principal,
-                        date: 'Just Now',
+                        date: formatTransactionDate(Date.now()),
                         timestamp: Date.now(),
                         category: 'other'
                       };
@@ -4339,7 +4903,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                                 id: `tx-irs-${Date.now()}`,
                                 description: `US TREASURY DIRECT DEP: TAX RECV FILE PIN-SEC0${Math.floor(10 + Math.random() * 90)}`,
                                 amount: refundVal,
-                                date: 'Just Now',
+                                date: formatTransactionDate(Date.now()),
                                 timestamp: Date.now(),
                                 category: 'other'
                               };
@@ -4529,7 +5093,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                           id: `tx-disp-${Date.now()}`,
                           description: 'ATM DISPUTE CREDIT: PROVISIONAL REVERSAL',
                           amount: 52.50,
-                          date: 'Just Now',
+                          date: formatTransactionDate(Date.now()),
                           timestamp: Date.now(),
                           category: 'other'
                         };
@@ -5076,86 +5640,211 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       </nav>
 
       {/* MOBILE CHECK RAPID DEPOSIT MODAL PANEL */}
-      {showDepositModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
-          <div className="bg-white border border-slate-205 p-6 rounded-2xl w-full max-w-xs relative text-left shadow-2xl text-slate-800">
-            <h3 className="text-base font-bold text-slate-900 mb-1.5 flex items-center gap-1.5">
-              <Sparkles className="w-5 h-5 text-indigo-600" /> {depositOrWithdraw === 'deposit' ? 'Register Deposit' : 'Request Withdrawal'}
-            </h3>
-            <p className="text-[11px] text-slate-500 mb-3 font-sans leading-normal">
-              {depositOrWithdraw === 'deposit' ? 'Submit standard check deposit request for admin approval.' : 'Withdraw safely from your available holdings. Sent for instant admin verification.'}
-            </p>
-
-            {/* Segmented Control Toggle */}
-            <div className="flex bg-slate-100 p-1 rounded-xl mb-3.5">
-              <button
+      {showDepositModal && (() => {
+        const activeCfg = dwConfigs.find(c => c.id === selectedMethodId);
+        const isDeposit = depositOrWithdraw === 'deposit';
+        const isEnabled = activeCfg ? (isDeposit ? activeCfg.depositEnabled : activeCfg.withdrawEnabled) : true;
+        
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+            <div className="bg-white border border-slate-200 p-5 rounded-2xl w-full max-w-sm relative text-left shadow-2xl text-slate-800 max-h-[90vh] overflow-y-auto font-sans">
+              
+              <button 
                 type="button"
-                onClick={() => setDepositOrWithdraw('deposit')}
-                className={`flex-1 text-center py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${depositOrWithdraw === 'deposit' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
+                onClick={() => {
+                  setDepositAmount('');
+                  setDwReference('');
+                  setShowDepositModal(false);
+                }}
+                className="absolute top-4 right-4 w-6 h-6 rounded-full bg-slate-100 hover:bg-slate-200 border-none flex items-center justify-center text-slate-400 hover:text-slate-700 transition cursor-pointer font-bold text-xs"
               >
-                Deposit
+                ✕
               </button>
-              <button
-                type="button"
-                onClick={() => setDepositOrWithdraw('withdraw')}
-                className={`flex-1 text-center py-1.5 text-[11px] font-bold rounded-lg transition-all cursor-pointer ${depositOrWithdraw === 'withdraw' ? 'bg-white text-indigo-600 shadow-xs' : 'text-slate-500 hover:text-slate-800'}`}
-              >
-                Withdrawal
-              </button>
-            </div>
 
-            <form onSubmit={handleCheckDeposit} className="space-y-3">
-              <div className="space-y-1">
-                <span className="text-[10px] text-indigo-600 uppercase font-bold">
-                  {depositOrWithdraw === 'deposit' ? 'Destination Ledger' : 'Source Ledger'}
-                </span>
-                <select 
-                  value={depositTarget} 
-                  onChange={(e) => setDepositTarget(e.target.value)}
-                  className="w-full bg-white border border-slate-200 rounded-lg py-2 px-3 text-xs text-slate-850"
-                >
-                  {currentUser.accounts.map(a => (
-                    <option key={a.id} value={a.id} className="text-slate-850">{a.name} ({formatCurrency(a.balance)})</option>
-                  ))}
-                </select>
-              </div>
+              <h3 className="text-sm font-black text-slate-900 mb-1 flex items-center gap-1.5 uppercase tracking-wide">
+                <Sparkles className="w-4 h-4 text-indigo-600 shrink-0" /> {isDeposit ? 'Register Deposit' : 'Request Withdrawal'}
+              </h3>
+              <p className="text-[10px] text-slate-500 mb-3 leading-normal">
+                {isDeposit ? 'Submit dynamic deposit references for manual verification and credit approval.' : 'Request manual holding dispersal or external settlement securely.'}
+              </p>
 
-              <div className="space-y-1">
-                <span className="text-[10px] text-indigo-600 uppercase font-bold">
-                  {depositOrWithdraw === 'deposit' ? 'Amount to deposit ($)' : 'Amount to withdraw ($)'}
-                </span>
-                <input 
-                  type="number"
-                  required
-                  value={depositAmount}
-                  onChange={(e) => setDepositAmount(e.target.value)}
-                  placeholder="e.g. 1000"
-                  className="w-full bg-white border border-slate-200 rounded-lg py-2 px-3 text-xs text-slate-850 font-mono outline-none focus:border-indigo-500"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2.5">
+              {/* Segmented Control Toggle - Deposit vs Withdrawal */}
+              <div className="flex bg-slate-100 p-0.5 rounded-xl mb-3 border border-slate-150">
                 <button
                   type="button"
-                  onClick={() => {
-                    setDepositAmount('');
-                    setShowDepositModal(false);
-                  }}
-                  className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 text-xs py-2 rounded-lg transition font-bold cursor-pointer shadow-xs"
+                  onClick={() => setDepositOrWithdraw('deposit')}
+                  className={`flex-1 text-center py-1.5 text-[10px] font-extrabold rounded-lg transition-all cursor-pointer border-none ${isDeposit ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800 bg-transparent'}`}
                 >
-                  Cancel
+                  Deposit
                 </button>
                 <button
-                  type="submit"
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded-lg transition font-bold cursor-pointer"
+                  type="button"
+                  onClick={() => setDepositOrWithdraw('withdraw')}
+                  className={`flex-1 text-center py-1.5 text-[10px] font-extrabold rounded-lg transition-all cursor-pointer border-none ${!isDeposit ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800 bg-transparent'}`}
                 >
-                  {depositOrWithdraw === 'deposit' ? 'Confirm Deposit' : 'Confirm Withdrawal'}
+                  Withdrawal
                 </button>
               </div>
-            </form>
+
+              {/* Payment Method Selector Grid */}
+              <span className="text-[9px] text-indigo-650 font-black uppercase tracking-wider block mb-1">Select Transfer Network:</span>
+              <div className="grid grid-cols-3 gap-1 mb-4 select-none">
+                {([
+                  { id: 'bank', name: '🏦 Bank Wire' },
+                  { id: 'check', name: '📝 Check Pay' },
+                  { id: 'crypto', name: '🪙 USD-Crypto' }
+                ] as const).map((method) => {
+                  const cfgObj = dwConfigs.find(c => c.id === method.id);
+                  const isChEnabled = cfgObj ? (isDeposit ? cfgObj.depositEnabled : cfgObj.withdrawEnabled) : true;
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setSelectedMethodId(method.id)}
+                      className={`py-1.5 px-0.5 text-[9px] font-black rounded-lg transition text-center cursor-pointer flex flex-col items-center justify-center gap-0.5 relative border-none ${
+                        selectedMethodId === method.id
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-100'
+                          : 'bg-slate-50 text-slate-650 hover:bg-slate-100 hover:text-slate-850'
+                      }`}
+                    >
+                      <span>{method.name}</span>
+                      <span className={`w-1.5 h-1.5 rounded-full absolute top-[3px] right-[4px] ${isChEnabled ? 'bg-emerald-500' : 'bg-rose-500'}`} title={isChEnabled ? "Channel enabled" : "Channel paused"} />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Guidelines / Instructions defined by Admin */}
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 mb-3 space-y-2 text-left leading-normal">
+                <div className="flex justify-between items-center pb-1 border-b border-slate-200">
+                  <span className="text-[9px] font-black uppercase text-slate-500 block font-mono">Administrative Guidelines</span>
+                  <span className={`text-[8px] font-bold font-mono px-1 py-0.5 rounded border uppercase shrink-0 ${
+                    isEnabled 
+                      ? 'text-emerald-700 bg-emerald-50 border-emerald-100' 
+                      : 'text-rose-700 bg-rose-50 border-rose-100'
+                  }`}>
+                    {isEnabled ? 'ACTIVE GUIDELINES' : 'OFF-LINE'}
+                  </span>
+                </div>
+                
+                <p className="text-[10px] text-slate-600 font-medium whitespace-pre-wrap leading-relaxed">
+                  {activeCfg ? (isDeposit ? activeCfg.depositInstructions : activeCfg.withdrawInstructions) : 'No guidelines specified.'}
+                </p>
+
+                {/* If Deposit and enabled, show fields to copy */}
+                {isDeposit && isEnabled && activeCfg && Object.keys(activeCfg.depositFields).length > 0 && (
+                  <div className="pt-2 border-t border-slate-200 space-y-1.5 text-left">
+                    <span className="text-[8px] font-black text-rose-600 uppercase tracking-wide block">Direct Settlement Data (Tap to Copy):</span>
+                    <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                      {Object.entries(activeCfg.depositFields).map(([fKey, fVal]) => {
+                        const parsedVal = (fVal as string).replace('{username}', currentUser.username);
+                        return (
+                          <div 
+                            key={fKey} 
+                            onClick={() => handleCopy(parsedVal, fKey)}
+                            className="bg-white hover:bg-slate-100 p-1.5 rounded border border-slate-200 cursor-pointer text-[9px] flex justify-between items-center transition"
+                          >
+                            <div className="truncate pr-1 text-left">
+                              <span className="font-extrabold text-slate-500 uppercase text-[8px] block">{fKey}</span>
+                              <span className="font-mono text-slate-805 select-all font-bold text-slate-800">{parsedVal}</span>
+                            </div>
+                            <span className="text-[8px] shrink-0 font-mono text-indigo-600 font-bold bg-indigo-50 px-1 py-0.5 rounded">
+                              {copiedField === fKey ? 'Copied ✅' : 'Copy'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!isEnabled ? (
+                <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 p-y-2.5 text-center text-rose-700 font-bold text-[10px] leading-normal mb-3">
+                  ⚠️ This payment channel is suspended by administrators. Direct transaction requests are temporarily disabled. Please contact physical system desk services.
+                </div>
+              ) : (
+                <form onSubmit={handleCheckDeposit} className="space-y-3">
+                  <div className="space-y-1 text-left">
+                    <span className="text-[9px] text-indigo-650 uppercase font-black tracking-wide block">
+                      {isDeposit ? 'Destination Savings Ledger' : 'Source Dispersal Ledger'}
+                    </span>
+                    <select 
+                      value={depositTarget} 
+                      onChange={(e) => setDepositTarget(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-2.5 text-xs text-slate-850"
+                    >
+                      {currentUser.accounts.map(a => (
+                        <option key={a.id} value={a.id} className="text-slate-850">{a.name} ({formatCurrency(a.balance)})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="space-y-1 text-left">
+                    <span className="text-[9px] text-indigo-650 uppercase font-black tracking-wide block">
+                      Amount to Transfer ($ USD)
+                    </span>
+                    <input 
+                      type="number"
+                      required
+                      min={1}
+                      step="any"
+                      value={depositAmount}
+                      onChange={(e) => setDepositAmount(e.target.value)}
+                      placeholder="e.g. 1000.00"
+                      className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-2.5 text-xs text-slate-850 font-mono outline-none focus:border-indigo-500 font-bold"
+                    />
+                  </div>
+
+                  <div className="space-y-1 text-left">
+                    <span className="text-[9px] text-indigo-650 uppercase font-black tracking-wide block">
+                      {selectedMethodId === 'bank' 
+                        ? (isDeposit ? 'Your Depositing Name / Reference Info' : 'Recipient Account Routing & Number') 
+                        : selectedMethodId === 'check'
+                          ? 'Check Serial Number'
+                          : (isDeposit ? 'Your Sender Wallet Address / TXID' : 'Your Recipient USDT/Crypto Wallet Address')}
+                    </span>
+                    <input 
+                      type="text"
+                      required
+                      value={dwReference}
+                      onChange={(e) => setDwReference(e.target.value)}
+                      placeholder={
+                        selectedMethodId === 'bank' 
+                          ? (isDeposit ? 'e.g. John Cooper - Chase Wire' : 'Routing, Account info...')
+                          : selectedMethodId === 'check'
+                            ? 'e.g. Serial #29485721'
+                            : (isDeposit ? 'e.g. TXID: f589a2b6e...' : 'Your USDT Wallets (TRC20)...')
+                      }
+                      className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-2.5 text-xs text-slate-850 font-mono outline-none focus:border-indigo-500 font-extrabold"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-1 font-sans">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDepositAmount('');
+                        setDwReference('');
+                        setShowDepositModal(false);
+                      }}
+                      className="flex-1 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 text-xs py-2 rounded-lg transition font-bold cursor-pointer shadow-2xs"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded-lg transition font-extrabold cursor-pointer border-none"
+                    >
+                      {depositOrWithdraw === 'deposit' ? 'Confirm Deposit' : 'Confirm Withdrawal'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* EXQUISITE BANKING MENU OVERLAY (SCREENSHOT 1 GRAPHIC STYLE FOR MOBILE / DESKTOP PREVIEWS) */}
       {showBankingMenu && (
@@ -5537,6 +6226,101 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
               )}
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Floating Animated Lockscreen Push Toast Alerts Overlay */}
+      <div className="fixed top-4 right-4 z-[9999] max-w-sm w-full space-y-3 pointer-events-none">
+        {activeInAppToasts.map((toast) => (
+          <div 
+            key={toast.id}
+            className="bg-[#090e24]/95 backdrop-blur-md border border-indigo-950/80 hover:border-indigo-800 text-white rounded-2xl p-4 shadow-2xl flex gap-3 pointer-events-auto transform translate-y-0 transition-all duration-300 animate-slide-in-right cursor-pointer hover:bg-[#0c1330] text-left"
+            onClick={() => {
+              if (toast.type === 'email') {
+                setSelectedEmailForViewer(toast);
+              } else {
+                setShowNotifications(true);
+              }
+            }}
+          >
+            <div className="flex-shrink-0 w-10 h-10 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-lg">
+              {toast.category === 'otp' ? '🔒' : toast.category === 'transaction' ? '💸' : toast.category === 'security' ? '🌐' : '📢'}
+            </div>
+            <div className="flex-grow">
+              <div className="flex justify-between items-center gap-2">
+                <span className="text-[9px] text-indigo-400 font-mono font-bold uppercase tracking-widest">{toast.type.toUpperCase()} NOTIFICATION</span>
+                <span className="text-[8px] text-slate-500 font-mono shrink-0">Just Now</span>
+              </div>
+              <p className="text-xs font-extrabold text-slate-100 mt-0.5 leading-snug">{toast.title}</p>
+              <p className="text-[11px] text-slate-400 mt-1 leading-normal line-clamp-2">{toast.body}</p>
+              {toast.type === 'email' && (
+                <span className="text-[9px] text-blue-400 hover:underline inline-flex items-center gap-1 mt-1.5 font-mono font-bold">
+                  🔓 DECRYPT FULL CLIENT E-MAIL →
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Cryptographic WebMail Sandbox Viewer Overlay Modal */}
+      {selectedEmailForViewer && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
+          <div className="bg-[#090e24] border border-slate-800 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl flex flex-col h-[85vh] text-left animate-fade-in">
+            {/* Decryptor top bar */}
+            <div className="bg-[#030712] border-b border-indigo-950/40 px-6 py-4 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                <div>
+                  <p className="text-xs font-mono font-bold text-slate-300 uppercase tracking-widest leading-none">Security Decryptor Vault</p>
+                  <p className="text-[10px] text-slate-500 font-mono mt-1 leading-none">Sandbox simulated TLS secure channel: compliance-notif-inbox</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSelectedEmailForViewer(null)}
+                className="w-8 h-8 rounded-full border border-slate-800 bg-slate-900 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer font-bold text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Cryptographic Mail Metadata Headers */}
+            <div className="bg-[#05091a] px-6 py-4 border-b border-indigo-950/20 space-y-1 z-10 shrink-0">
+              <p className="text-xs text-slate-300 font-medium">
+                <strong className="text-indigo-400">Sender:</strong> Unitycore Secure System &lt;no-reply@unitycore.io&gt;
+              </p>
+              <p className="text-xs text-slate-300 font-medium">
+                <strong className="text-indigo-400">Recipient:</strong> {selectedEmailForViewer.recipient}
+              </p>
+              <p className="text-xs text-slate-300 font-medium">
+                <strong className="text-indigo-400">Subject:</strong> {selectedEmailForViewer.title}
+              </p>
+              <p className="text-[10px] text-slate-500 font-mono uppercase tracking-wider pt-0.5">
+                🔒 cryptographic token verifiable: SHA256-tx-{selectedEmailForViewer.id.substring(0, 15)}...
+              </p>
+            </div>
+
+            {/* Decoded sandbox visual body */}
+            <div className="flex-grow bg-[#020617] p-1.5 overflow-hidden">
+              <iframe 
+                srcDoc={selectedEmailForViewer.htmlBody} 
+                title="Decrypted Mail Payload Sandbox" 
+                className="w-full h-full border-0 rounded-2xl bg-[#020617]"
+                referrerPolicy="no-referrer"
+              />
+            </div>
+
+            {/* Modal actions footer */}
+            <div className="bg-[#030712] border-t border-slate-900/60 px-6 py-4 flex justify-between items-center shrink-0">
+              <span className="text-[10px] font-mono text-slate-500 uppercase">Status: OK_SECURE_FRAME_LOADED</span>
+              <button 
+                onClick={() => setSelectedEmailForViewer(null)}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl cursor-pointer transition shadow-lg"
+              >
+                Dismiss Reader
+              </button>
+            </div>
           </div>
         </div>
       )}

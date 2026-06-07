@@ -107,4 +107,18 @@ export interface BankUser {
   transactionPin?: string;
   password?: string;
   iban?: string;
+  notifications?: BankNotification[];
 }
+
+export interface BankNotification {
+  id: string;
+  type: 'email' | 'push';
+  category: 'otp' | 'transaction' | 'security' | 'registration' | 'support' | 'biller' | 'other';
+  title: string;
+  body: string;
+  htmlBody?: string;
+  timestamp: number;
+  isRead: boolean;
+  recipient: string;
+}
+
