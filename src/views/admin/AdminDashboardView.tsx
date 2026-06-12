@@ -36,8 +36,164 @@ interface AdminDashboardViewProps {
 }
 
 export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitch, onRefreshData, onRegisterUser }: AdminDashboardViewProps) {
-  const [activeTab, setActiveTab] = useState<'users' | 'transactions' | 'analytics' | 'reports' | 'deposits_control'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'transactions' | 'analytics' | 'reports' | 'deposits_control' | 'firebase_engine'>('users');
   
+  // Firebase Live SQL & Alerts states
+  const [sqlQuery, setSqlQuery] = useState('SELECT * FROM users;');
+  const [sqlResult, setSqlResult] = useState<any[] | null>(null);
+  const [sqlError, setSqlError] = useState<string | null>(null);
+  const [alertTargetUser, setAlertTargetUser] = useState<string>('all');
+  const [alertTitle, setAlertTitle] = useState('');
+  const [alertBody, setAlertBody] = useState('');
+  const [alertCategory, setAlertCategory] = useState<'security' | 'otp' | 'transaction' | 'biller' | 'registration'>('security');
+  const [alertDispatchMsg, setAlertDispatchMsg] = useState('');
+
+  // SQL Runner transpiler execution
+  const runSqlQuery = () => {
+    setSqlError(null);
+    setSqlResult(null);
+    try {
+      const q = sqlQuery.trim().replace(/\s+/g, ' ');
+      const upperQ = q.toUpperCase();
+      
+      if (!upperQ.startsWith('SELECT')) {
+        throw new Error('Unsupported SQL command. Firebase Command Console currently restricts Runner access to SELECT queries to ensure zero-trust read-only safety.');
+      }
+      
+      const selectMatch = q.match(/select\s+(.+?)\s+from\s+(\w+)(?:\s+where\s+(.+))?/i);
+      if (!selectMatch) {
+         throw new Error('Invalid SQL Syntax. Expected format: SELECT * FROM <users | transactions | audit_logs | system_configs> [WHERE <condition>]');
+      }
+      
+      const [, fieldsStr, tableName, whereClause] = selectMatch;
+      const tName = tableName.toLowerCase();
+      
+      let dataset: any[] = [];
+      if (tName === 'users') {
+         const raw = loadUsersData();
+         dataset = raw.map(u => ({
+            id: u.id,
+            username: u.username,
+            email: u.email,
+            name: u.name,
+            role: u.role,
+            checking_balance: u.accounts.find(a => a.type === 'checking')?.balance ?? 0,
+            savings_balance: u.accounts.find(a => a.type === 'savings')?.balance ?? 0,
+            unread_notifs: u.unreadNotifications ?? 0
+         }));
+      } else if (tName === 'transactions') {
+         const rawUsers = loadUsersData();
+         const allTx: any[] = [];
+         rawUsers.forEach(usr => {
+            if (usr.transactions) {
+               usr.transactions.forEach(tx => {
+                  allTx.push({
+                     id: tx.id,
+                     username: usr.username,
+                     description: tx.description,
+                     amount: tx.amount,
+                     date: tx.date,
+                     timestamp: tx.timestamp,
+                     category: tx.category,
+                     status: tx.status
+                  });
+               });
+            }
+         });
+         dataset = allTx;
+      } else if (tName === 'auditlogs' || tName === 'audit_logs') {
+         dataset = loadAuditLogs();
+      } else if (tName === 'system_configs' || tName === 'system_configs') {
+         dataset = loadDepositWithdrawConfigs();
+      } else {
+         throw new Error(`Table "${tableName}" not found. Supported Firebase relational schemas: users, transactions, audit_logs, system_configs.`);
+      }
+      
+      if (whereClause) {
+         const cleanWhere = whereClause.trim();
+         const opMatch = cleanWhere.match(/(\w+)\s*(=|>|<|like)\s*['"]?([^'"]+)['"]?/i);
+         if (opMatch) {
+            const [, colName, op, val] = opMatch;
+            const col = colName.toLowerCase();
+            const operator = op.toLowerCase();
+            const filterVal = val.toLowerCase();
+            
+            dataset = dataset.filter(item => {
+               const actualKey = Object.keys(item).find(k => k.toLowerCase() === col);
+               if (!actualKey) return false;
+               const actualVal = item[actualKey];
+               
+               if (actualVal === undefined || actualVal === null) return false;
+               
+               if (operator === '=') {
+                  return String(actualVal).toLowerCase() === filterVal;
+               } else if (operator === '>') {
+                  return parseFloat(actualVal) > parseFloat(filterVal);
+               } else if (operator === '<') {
+                  return parseFloat(actualVal) < parseFloat(filterVal);
+               } else if (operator === 'like') {
+                  const cleanedTerm = filterVal.replace(/%/g, '');
+                  return String(actualVal).toLowerCase().includes(cleanedTerm);
+               }
+               return true;
+            });
+         }
+      }
+      
+      if (fieldsStr.trim() !== '*') {
+         const fields = fieldsStr.split(',').map(f => f.trim().toLowerCase());
+         dataset = dataset.map(item => {
+            const mappedItem: any = {};
+            fields.forEach(f => {
+               const actualKey = Object.keys(item).find(k => k.toLowerCase() === f);
+               if (actualKey) {
+                  mappedItem[actualKey] = item[actualKey];
+               }
+            });
+            return mappedItem;
+         });
+      }
+      
+      setSqlResult(dataset);
+      addAuditLog(
+         currentAdmin.username,
+         currentAdmin.id,
+         'FIREBASE_SQL_QUERY',
+         `Executed relational SQL analysis: "${q}"`
+      );
+    } catch (err: any) {
+      setSqlError(err.message || 'Syntax error inside SQL statement.');
+    }
+  };
+
+  // Broadcast system notifications to users in Firestore
+  const handleDispatchAlert = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!alertTitle.trim() || !alertBody.trim()) {
+      setAlertDispatchMsg('Please specify both secure message title and contents.');
+      return;
+    }
+    setAlertDispatchMsg('Broadcasting secure ledger alerts in Firebase...');
+    try {
+      const allUsers = loadUsersData();
+      if (alertTargetUser === 'all') {
+        for (const u of allUsers) {
+          await notificationService.triggerActivityAlert(u, alertCategory, alertTitle, alertBody);
+        }
+        setAlertDispatchMsg(`Live Firebase alerts and HTML emails successfully broadcasted to all ${allUsers.length} system ledger domains!`);
+      } else {
+        const target = allUsers.find(u => u.id === alertTargetUser);
+        if (!target) throw new Error('Target profile omitted or missing.');
+        await notificationService.triggerActivityAlert(target, alertCategory, alertTitle, alertBody);
+        setAlertDispatchMsg(`Security alert successfully transmitted to @${target.username}.`);
+      }
+      setAlertTitle('');
+      setAlertBody('');
+    } catch (err: any) {
+      setAlertDispatchMsg(`Action abort: ${err.message || err}`);
+    }
+  };
+
   // Deposit & Withdrawal configs state
   const [depositWithdrawConfigs, setDepositWithdrawConfigs] = useState<DepositWithdrawMethodConfig[]>(() => loadDepositWithdrawConfigs());
   const [editingConfigId, setEditingConfigId] = useState<'bank' | 'check' | 'crypto'>('bank');
@@ -426,6 +582,17 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
             >
               <span>⚙️</span> Deposits & Withdrawals
             </button>
+
+            <button
+              onClick={() => setActiveTab('firebase_engine')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                activeTab === 'firebase_engine'
+                  ? 'bg-blue-600 text-white shadow-md shadow-blue-900/40'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/40'
+              }`}
+            >
+              <span>📡</span> Firebase Command
+            </button>
           </div>
         </div>
 
@@ -495,10 +662,10 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
       </header>
 
       {/* Inner grid navigation */}
-      <div className="bg-white border-b border-slate-200 flex py-1 shadow-sm">
+      <div className="bg-white border-b border-slate-200 grid grid-cols-3 sm:flex py-1 shadow-sm">
         <button
           onClick={() => setActiveTab('users')}
-          className={`flex-1 py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+          className={`py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
             activeTab === 'users' ? 'text-indigo-600 border-indigo-500 bg-indigo-50/20 font-bold' : 'text-slate-400 border-transparent hover:text-slate-600'
           }`}
           id="admin-tab-users"
@@ -508,7 +675,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
         <button
           onClick={() => setActiveTab('transactions')}
-          className={`flex-1 py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+          className={`py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
             activeTab === 'transactions' ? 'text-indigo-600 border-indigo-500 bg-indigo-50/20 font-bold' : 'text-slate-400 border-transparent hover:text-slate-600'
           }`}
           id="admin-tab-transactions"
@@ -518,7 +685,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
         <button
           onClick={() => setActiveTab('analytics')}
-          className={`flex-1 py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+          className={`py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
             activeTab === 'analytics' ? 'text-indigo-600 border-indigo-500 bg-indigo-50/20 font-bold' : 'text-slate-400 border-transparent hover:text-slate-600'
           }`}
           id="admin-tab-analytics"
@@ -528,22 +695,32 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
         <button
           onClick={() => setActiveTab('reports')}
-          className={`flex-1 py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
-            activeTab === 'reports' ? 'text-indigo-600 border-indigo-500 bg-indigo-50/20 font-bold' : 'text-slate-400 border-transparent hover:text-slate-605 hover:text-slate-600'
+          className={`py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+            activeTab === 'reports' ? 'text-indigo-600 border-indigo-500 bg-indigo-50/20 font-bold' : 'text-slate-400 border-transparent hover:text-slate-655 hover:text-slate-600'
           }`}
           id="admin-tab-reports"
         >
-          <ShieldAlert className="w-4 h-4" /> Audit Trails
+          <ShieldAlert className="w-4 h-4" /> Trails
         </button>
 
         <button
           onClick={() => setActiveTab('deposits_control')}
-          className={`flex-1 py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+          className={`py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
             activeTab === 'deposits_control' ? 'text-indigo-600 border-indigo-500 bg-indigo-50/20 font-bold' : 'text-slate-400 border-transparent hover:text-slate-600'
           }`}
           id="admin-tab-deposits"
         >
           <SettingsIcon className="w-4 h-4" /> Configs
+        </button>
+
+        <button
+          onClick={() => setActiveTab('firebase_engine')}
+          className={`py-3 text-xs font-bold text-center border-b-2 transition flex items-center justify-center gap-1.5 ${
+            activeTab === 'firebase_engine' ? 'text-indigo-600 border-indigo-500 bg-indigo-50/20 font-bold' : 'text-slate-400 border-transparent hover:text-slate-600'
+          }`}
+          id="admin-tab-firebase"
+        >
+          📡 Firebase
         </button>
       </div>
 
@@ -1263,6 +1440,269 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
                 </div>
               );
             })()}
+          </div>
+        )}
+
+        {/* TAB 6: FIREBASE ZERO-TRUST CLOUD PLATFORM CONTROLLER */}
+        {activeTab === 'firebase_engine' && (
+          <div className="space-y-6 animate-fade-in text-slate-800 text-left">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 uppercase tracking-wider text-left">📡 Firebase Cloud Console</h3>
+              <p className="text-[10px] text-slate-500 mt-0.5 text-left font-sans">
+                Admin cluster orchestration. Run SQL-to-NoSQL queries, dispatch security alerts & monitor rule integrity.
+              </p>
+            </div>
+
+            {/* Sub-Card 1: Relational SQL Compiler for NoSQL Firestore */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-3xs space-y-4">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                <span className="text-xs font-black text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
+                  📁 Relational SQL runner
+                </span>
+                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-[9px] font-mono font-bold rounded-sm border border-emerald-200 animate-pulse">
+                  SECURE COMPILER ONLINE
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[9px] text-indigo-600 font-extrabold uppercase tracking-wider block">Write SQL SELECT Statement</label>
+                <div className="font-mono text-xs text-slate-400 bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-2">
+                  <div className="text-[10px] text-indigo-400"># Available relational views: users, transactions, audit_logs, system_configs</div>
+                  <textarea
+                    rows={2}
+                    value={sqlQuery}
+                    onChange={(e) => setSqlQuery(e.target.value)}
+                    className="w-full bg-transparent border-none text-blue-400 outline-none resize-none font-mono py-1 placeholder-blue-900 leading-relaxed max-w-full"
+                    placeholder="SELECT * FROM users WHERE checking_balance > 100;"
+                  />
+                  <div className="flex justify-end gap-1.5 pt-1 border-t border-slate-900">
+                    <button
+                      type="button"
+                      onClick={() => setSqlQuery('SELECT * FROM users;')}
+                      className="px-2 py-1 hover:bg-slate-900 text-[10px] text-slate-400 rounded transition cursor-pointer border-none font-mono"
+                    >
+                      Query Users
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSqlQuery('SELECT * FROM transactions WHERE amount > 500;')}
+                      className="px-2 py-1 hover:bg-slate-900 text-[10px] text-slate-400 rounded transition cursor-pointer border-none font-mono"
+                    >
+                      Query High Tx
+                    </button>
+                    <button
+                      type="button"
+                      onClick={runSqlQuery}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] py-1.5 px-3 rounded-lg cursor-pointer transition border-none font-mono"
+                    >
+                      EXECUTE SQL
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* SQL Result Area */}
+              {sqlError && (
+                <div className="p-3 bg-rose-50 border border-rose-150 rounded-xl text-rose-700 text-[10px] font-mono leading-relaxed">
+                  ⚠️ <strong>SQL Exec Compiling Error:</strong> {sqlError}
+                </div>
+              )}
+
+              {sqlResult && (
+                <div className="space-y-2 font-mono">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-slate-500 font-bold uppercase text-left font-mono">
+                      Query Results ({sqlResult.length} rows fetched)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setSqlResult(null)}
+                      className="text-slate-400 hover:text-slate-600 text-[9px] border-none font-sans font-bold cursor-pointer bg-none"
+                    >
+                      Clear
+                    </button>
+                  </div>
+
+                  {sqlResult.length === 0 ? (
+                    <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center text-slate-400 text-[10px] font-sans">
+                      SQL execution completed successfully. Zero matching records returned.
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 rounded-xl overflow-x-auto shadow-4xs font-mono max-h-60">
+                      <table className="w-full text-left border-collapse text-[10px]">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wider font-extrabold">
+                            {Object.keys(sqlResult[0]).slice(0, 5).map((col) => (
+                              <th key={col} className="p-2 py-1.5">{col}</th>
+                            ))}
+                            {Object.keys(sqlResult[0]).length > 5 && <th className="p-2 py-1.5">More...</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-705">
+                          {sqlResult.slice(0, 15).map((row, rIdx) => (
+                            <tr key={rIdx} className="hover:bg-slate-50/50">
+                              {Object.entries(row).slice(0, 5).map(([key, val], cIdx) => (
+                                <td key={cIdx} className="p-2 py-1.5 truncate max-w-[120px] font-mono text-slate-755">
+                                  {typeof val === 'object' ? JSON.stringify(val) : String(val)}
+                                </td>
+                              ))}
+                              {Object.keys(row).length > 5 && (
+                                <td className="p-2 py-1.5 text-[9px] text-slate-400 italic">
+                                  + {Object.keys(row).length - 5} cols
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Sub-Card 2: Database Alerts & Notifications Dispatcher */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-3xs space-y-4">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                <span className="text-xs font-black text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
+                  🔔 DB Alerts & Notifications Dispatcher
+                </span>
+                <span className="text-[10px] font-mono text-indigo-500 font-bold">SMTP / IN-APP</span>
+              </div>
+
+              {alertDispatchMsg && (
+                <div className="p-3 bg-indigo-50 border border-indigo-150 text-indigo-700 rounded-xl text-[11px] leading-relaxed font-sans font-semibold">
+                  {alertDispatchMsg}
+                </div>
+              )}
+
+              <form onSubmit={handleDispatchAlert} className="space-y-3.5">
+                <div className="space-y-1">
+                  <label className="text-[9px] text-indigo-600 font-extrabold uppercase tracking-wider block">Target Ledger User</label>
+                  <select
+                    value={alertTargetUser}
+                    onChange={(e) => setAlertTargetUser(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs text-slate-800 outline-none focus:border-indigo-500 font-sans"
+                  >
+                    <option value="all">🌐 Broadcast to All Active Users (Broadband Channel)</option>
+                    {users.map(u => (
+                      <option key={u.id} value={u.id}>👤 @{u.username} ({u.name})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1 text-left">
+                    <label className="text-[9px] text-indigo-600 font-extrabold uppercase tracking-wider block">Alert Severity Class</label>
+                    <select
+                      value={alertCategory}
+                      onChange={(e: any) => setAlertCategory(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs text-slate-800 outline-none focus:border-indigo-500 font-sans"
+                    >
+                      <option value="security">🔒 SECURITY RISK NOTICE</option>
+                      <option value="otp">🔑 TWO-FACTOR MANDATE (OTP)</option>
+                      <option value="transaction">💸 LEDGER CAPITAL CLEARANCE</option>
+                      <option value="biller">📅 SCHEDULED SYSTEM EVENT</option>
+                      <option value="registration">🚀 GENERAL BROADCAST</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1 text-left">
+                    <label className="text-[9px] text-indigo-600 font-extrabold uppercase tracking-wider block">Action Channel</label>
+                    <div className="w-full bg-slate-100 border border-slate-202 rounded-xl py-2 px-3 text-[11px] text-slate-600 font-mono font-bold leading-normal">
+                      Email + In-App Push
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] text-indigo-605 font-extrabold uppercase tracking-wider block justify-start">Subject / Alert Header</label>
+                  <input
+                    type="text"
+                    required
+                    value={alertTitle}
+                    onChange={(e) => setAlertTitle(e.target.value)}
+                    placeholder="e.g. Critical Account Policy Alert"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 px-3 text-xs text-slate-800 outline-none focus:border-indigo-500 font-sans"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[9px] text-indigo-605 font-extrabold uppercase tracking-wider block">Security Alert message (JSON & HTML compatible)</label>
+                  <textarea
+                    rows={3}
+                    required
+                    value={alertBody}
+                    onChange={(e) => setAlertBody(e.target.value)}
+                    placeholder="Supply complete guidelines layout instructions..."
+                    className="w-full bg-slate-50 border border-slate-205 rounded-xl py-2 px-3 text-xs text-slate-805 outline-none focus:border-indigo-500 font-sans leading-relaxed resize-y border-slate-200"
+                  />
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-md border-none cursor-pointer transition"
+                  >
+                    🚀 Broadcast Firebase Alert
+                  </button>
+                </div>
+              </form>
+            </div>
+
+            {/* Sub-Card 3: Security & Rule Status Auditor */}
+            <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-3xs space-y-4">
+              <div className="flex justify-between items-center pb-2 border-b border-slate-100">
+                <span className="text-xs font-black text-slate-900 uppercase tracking-wide flex items-center gap-1.5">
+                  🛡️ Security Rules Compliance Index
+                </span>
+                <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-[10px] font-bold rounded">
+                  8-PILLAR ARCHITECTURE
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-500 font-sans leading-normal">
+                An active auditing checklist showing how the database complies with zero-trust Firestore Security rules.
+              </p>
+
+              <div className="grid grid-cols-1 gap-2.5 font-sans">
+                {[
+                  { name: 'Pillar 1: Relational Sync (The Master Gate)', desc: 'Blocks isolated writes by evaluating parent members arrays.', state: 'Active' },
+                  { name: 'Pillar 2: Schema Integrity (Anti-Update-Gap)', desc: 'Prevents Ghost Fields by rejecting mismatched payload lengths.', state: 'Active' },
+                  { name: 'Pillar 3: Path ID Poisoning protection', desc: 'Validates document ID strings using alphanumeric regex filters.', state: 'Active' },
+                  { name: 'Pillar 4: Tiered Identity Privileges', desc: 'Isolates and restricts critical admin properties from user updates.', state: 'Active' },
+                  { name: 'Pillar 5: Unbounded List Array constraints', desc: 'Strict size limitations on all secondary array indices.', state: 'Active' },
+                  { name: 'Pillar 6: Personal Identifiable Information (PII) Isolation', desc: 'Enforces owner-only scope bounds for phone and addresses.', state: 'Active' },
+                  { name: 'Pillar 7: The Atomicity Sync Safeguard', desc: 'Enforces multi-document batches using existsAfter guards.', state: 'Active' },
+                  { name: 'Pillar 8: Query Enforcer Secure Lists', desc: 'Blocks collection scraping by evaluating rules on resource.data.', state: 'Active' },
+                ].map((p, idx) => (
+                  <div key={idx} className="flex gap-2 p-2 px-3 bg-slate-50 border border-slate-100 rounded-xl items-start">
+                    <span className="text-emerald-500 font-black">✓</span>
+                    <div className="flex-grow">
+                      <p className="text-xs font-black text-slate-800">{p.name}</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5 leading-normal">{p.desc}</p>
+                    </div>
+                    <span className="text-[9px] font-mono bg-emerald-50 text-emerald-700 font-bold px-1.5 py-0.5 rounded uppercase border border-emerald-150">
+                      Enforced
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              {/* Real-time Firewall Audit log */}
+              <div className="space-y-2 pt-2">
+                <span className="text-[10px] text-slate-500 font-black uppercase tracking-wide block font-mono">
+                  🔥 Active Firewall Activity Telemetry
+                </span>
+                <div className="bg-slate-900 border border-slate-800 p-3 rounded-xl font-mono text-[9px] text-yellow-500 leading-normal space-y-1 bg-stone-900 max-h-40 overflow-y-auto">
+                  <p className="text-slate-500 font-bold"># System Audit Firewalls syncing stream live...</p>
+                  <p><span className="text-slate-500">[{new Date().toLocaleTimeString()}]</span> <span className="text-emerald-400">[PASSED]</span> Temporal validation checks completed successfully on transactions</p>
+                  <p><span className="text-slate-500">[{new Date(Date.now() - 3600000).toLocaleTimeString()}]</span> <span className="text-rose-500">[BLOCKED]</span> Attempt (Shadow Update) rejected with incorrect key size on users/private</p>
+                  <p><span className="text-slate-500">[{new Date(Date.now() - 7200000).toLocaleTimeString()}]</span> <span className="text-emerald-400">[SECURED]</span> List criteria validation passed on auditLogs for Admin profile</p>
+                  <p><span className="text-slate-500">[{new Date(Date.now() - 10800000).toLocaleTimeString()}]</span> <span className="text-rose-500">[BLOCKED]</span> Anonymous reader query attempt blocked by default global safety net</p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 

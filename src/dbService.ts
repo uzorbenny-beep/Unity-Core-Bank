@@ -39,14 +39,17 @@ export type DatabaseMode = "supabase" | "firebase" | "fallback_secure";
 
 export function getActiveMode(): DatabaseMode {
   const manualDriver = localStorage.getItem("active_db_driver") as DatabaseMode | null;
-  if (manualDriver && ["supabase", "firebase", "fallback_secure"].includes(manualDriver)) {
+  if (manualDriver && ["firebase", "supabase", "fallback_secure"].includes(manualDriver)) {
     return manualDriver;
+  }
+  // Default to firebase if configured, otherwise checked before any other driver
+  if (activeConfig && activeConfig.apiKey) {
+    return "firebase";
   }
   if (supabase) {
     return "supabase";
   }
-  // Default to firebase if configured, otherwise fallback_secure
-  return activeConfig && activeConfig.apiKey ? "firebase" : "fallback_secure";
+  return "fallback_secure";
 }
 
 // Minimal password simple salt + hash simulation for local secure vault checking
