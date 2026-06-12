@@ -102,6 +102,11 @@ export const dbService = {
           uid = userCred.user.uid;
           authUser = userCred.user;
         } catch (authErr: any) {
+          if (authErr.code === "auth/operation-not-allowed") {
+            throw new Error(
+              "Firebase Authentication Error: The 'Email/Password' identity provider is not enabled in your Firebase Console. To enable it: 1) Go to your Firebase Console, 2) Click 'Authentication' in the left sidebar, 3) Go to the 'Sign-in method' tab, 4) Under 'Sign-in providers', click 'Add new provider' and choose 'Email/Password', 5) Toggle 'Enable' and save."
+            );
+          }
           if (authErr.code === "auth/email-already-in-use") {
             console.log("[Firebase Sign-Up] Email already exists in Auth. Checking if Firestore profile is missing to auto-heal profile...");
             try {
@@ -118,6 +123,11 @@ export const dbService = {
               }
               console.log("[Firebase Sign-Up] Profile is missing from Firestore. Register flow will auto-recreate Firestore document for UID:", uid);
             } catch (signInErr: any) {
+              if (signInErr.code === "auth/operation-not-allowed") {
+                throw new Error(
+                  "Firebase Authentication Error: The 'Email/Password' identity provider is not enabled in your Firebase Console. To enable it: 1) Go to your Firebase Console, 2) Click 'Authentication' in the left sidebar, 3) Go to the 'Sign-in method' tab, 4) Under 'Sign-in providers', click 'Add new provider' and choose 'Email/Password', 5) Toggle 'Enable' and save."
+                );
+              }
               // Wrong password or other error; throw original registration error
               throw authErr;
             }
@@ -689,6 +699,11 @@ export const dbService = {
         }
       } catch (err: any) {
         console.error("[Firebase Login Error] Error: ", err);
+        if (err.code === "auth/operation-not-allowed") {
+          throw new Error(
+            "Firebase Authentication Error: The 'Email/Password' identity provider is not enabled in your Firebase Console. To enable it: 1) Go to your Firebase Console, 2) Click 'Authentication' in the left sidebar, 3) Go to the 'Sign-in method' tab, 4) Under 'Sign-in providers', click 'Add new provider' and choose 'Email/Password', 5) Toggle 'Enable' and save."
+          );
+        }
         // Rethrow standard unauthorized auth exceptions clearly
         if (
           err.code === "auth/wrong-password" ||
