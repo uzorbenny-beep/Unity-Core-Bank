@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { ArrowLeft, User, Mail, Landmark, Sparkles, Eye, EyeOff, ShieldCheck, Globe, Phone, KeyRound, Database, Settings2, Terminal, Server } from 'lucide-react';
-import { getActiveMode } from '../dbService';
+import { getActiveMode, dbService } from '../dbService';
 
 interface RegisterViewProps {
   onBack: () => void;
@@ -46,6 +46,38 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showDbSettings, setShowDbSettings] = useState(false);
+
+  const [supabaseUrlInput, setSupabaseUrlInput] = useState(() => {
+    return (import.meta as any).env.VITE_SUPABASE_URL || localStorage.getItem("VITE_SUPABASE_URL") || "";
+  });
+  const [supabaseAnonKeyInput, setSupabaseAnonKeyInput] = useState(() => {
+    return (import.meta as any).env.VITE_SUPABASE_ANON_KEY || localStorage.getItem("VITE_SUPABASE_ANON_KEY") || "";
+  });
+  const [isTestingConn, setIsTestingConn] = useState(false);
+  const [connTestResult, setConnTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const saveSupabaseCredentials = () => {
+    localStorage.setItem("VITE_SUPABASE_URL", supabaseUrlInput.trim());
+    localStorage.setItem("VITE_SUPABASE_ANON_KEY", supabaseAnonKeyInput.trim());
+    alert("Supabase credentials saved successfully. Reloading view to apply credentials and hydrate the database driver...");
+    window.location.reload();
+  };
+
+  const testSupabaseConnection = async () => {
+    setIsTestingConn(true);
+    setConnTestResult(null);
+    try {
+      const result = await dbService.testSupabaseConnection();
+      setConnTestResult(result);
+    } catch (err: any) {
+      setConnTestResult({
+        success: false,
+        message: err.message || "Failed to initiate test connection."
+      });
+    } finally {
+      setIsTestingConn(false);
+    }
+  };
 
   const handleRegisterInput = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,6 +195,26 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
       {/* Elegant Registration Card */}
       <div className="w-full max-w-xl bg-[#0f172a] border border-slate-800 rounded-3xl p-6 md:p-8 relative z-10 shadow-2xl my-auto animate-fade-in">
         
+        {/* Switch database helper banner */}
+        {getActiveMode() !== "firebase" && (
+          <div className="mb-5 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center">
+            <p className="text-[11px] text-amber-300 font-medium">
+              Unitycore is in <span className="text-white font-extrabold uppercase">{getActiveMode() === "fallback_secure" ? "local sandbox" : "supabase"}</span> mode.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem("active_db_driver", "firebase");
+                alert("Switched active database driver to Firebase Cloud database. Real-time Firebase Firestore is now active!");
+                window.location.reload();
+              }}
+              className="mt-2 w-full bg-amber-600 hover:bg-amber-700 active:scale-98 text-white font-extrabold text-[10px] py-1.5 px-3 rounded-xl transition duration-150 cursor-pointer shadow-sm animate-pulse"
+            >
+              Switch to Firebase Database (Recommended)
+            </button>
+          </div>
+        )}
+
         {/* Brand Header */}
         <div className="flex items-center justify-center gap-3.5 mb-6">
           <svg className="w-9 h-11" viewBox="0 0 100 120" fill="none">
@@ -188,10 +240,23 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
         </div>
 
         {/* Header Title */}
-        <div className="text-center mb-6">
+        <div className="text-center mb-6 font-sans">
           <h2 className="text-2xl font-bold text-white tracking-tight">Open an Account</h2>
           <p className="text-xs text-slate-400 mt-1">Configure your verified core ledger profile</p>
         </div>
+
+        {getActiveMode() === "firebase" && (
+          <div className="mb-5 p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center font-sans">
+            <span className="inline-flex items-center gap-1.5 text-amber-400 font-extrabold text-[10.5px] uppercase tracking-wide">
+              <Database className="w-3.5 h-3.5 animate-pulse" />
+              Firebase Cloud Database Active
+            </span>
+            <p className="text-[11px] text-slate-300 leading-normal mt-1">
+              Currently connected to the secure <span className="text-white font-semibold">Firebase Enterprise Cloud</span> database.
+              We recommend using the <span className="text-blue-400 font-semibold">Google Sign-In</span> channel below to automatically verify credentials and set up your ledger in 1 click!
+            </p>
+          </div>
+        )}
 
         {/* Input Form Setup */}
         <form onSubmit={handleRegisterInput} className="space-y-4 font-sans">
@@ -456,30 +521,26 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
             )}
           </button>
 
-          {showDbSettings && (
-            <>
-              <div className="flex items-center my-3">
-                <span className="flex-1 h-px bg-slate-800/80" />
-                <span className="text-[10px] text-slate-500 px-3 uppercase tracking-widest font-mono">or</span>
-                <span className="flex-1 h-px bg-slate-800/80" />
-              </div>
+          <div className="flex items-center my-3">
+            <span className="flex-1 h-px bg-slate-800/80" />
+            <span className="text-[10px] text-slate-500 px-3 uppercase tracking-widest font-mono">or</span>
+            <span className="flex-1 h-px bg-slate-800/80" />
+          </div>
 
-              <button
-                type="button"
-                onClick={onGoogleLogin}
-                className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-[#131a30] border border-slate-800/80 text-white font-bold py-3 px-4 rounded-xl transition duration-150 text-xs cursor-pointer"
-                id="btn-google-login-registerview"
-              >
-                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                  <path fill="#EA4335" d="M12 5.04c1.61 0 3.05.55 4.19 1.64l3.12-3.12C17.43 1.84 14.9 1 12 1 7.35 1 3.4 3.65 1.5 7.5l3.6 2.8C6.01 7.24 8.76 5.04 12 5.04z" />
-                  <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.44h6.46c-.28 1.48-1.12 2.73-2.38 3.58l3.6 2.8c2.11-1.95 3.33-4.82 3.33-8.48z" />
-                  <path fill="#FBBC05" d="M5.1 14.7c-.24-.71-.38-1.47-.38-2.7s.14-1.99.38-2.7L1.5 6.5C.54 8.42 0 10.61 0 12s.54 3.58 1.5 5.5l3.6-2.8z" />
-                  <path fill="#34A853" d="M12 23c3.24 0 5.97-1.08 7.96-2.92l-3.6-2.8c-1.11.74-2.53 1.18-4.36 1.18-3.24 0-5.99-2.2-6.97-5.26l-3.6 2.8C3.4 20.35 7.35 23 12 23z" />
-                </svg>
-                <span>Bypass Setup using Google</span>
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            onClick={onGoogleLogin}
+            className="w-full flex items-center justify-center gap-2 bg-[#0f172a] hover:bg-slate-900 border border-slate-800/80 hover:border-slate-700 text-white font-bold py-3.5 px-4 rounded-xl transition duration-150 text-xs cursor-pointer active:scale-98"
+            id="btn-google-login-registerview"
+          >
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <path fill="#EA4335" d="M12 5.04c1.61 0 3.05.55 4.19 1.64l3.12-3.12C17.43 1.84 14.9 1 12 1 7.35 1 3.4 3.65 1.5 7.5l3.6 2.8C6.01 7.24 8.76 5.04 12 5.04z" />
+              <path fill="#4285F4" d="M23.49 12.27c0-.81-.07-1.59-.2-2.34H12v4.44h6.46c-.28 1.48-1.12 2.73-2.38 3.58l3.6 2.8c2.11-1.95 3.33-4.82 3.33-8.48z" />
+              <path fill="#FBBC05" d="M5.1 14.7c-.24-.71-.38-1.47-.38-2.7s.14-1.99.38-2.7L1.5 6.5C.54 8.42 0 10.61 0 12s.54 3.58 1.5 5.5l3.6-2.8z" />
+              <path fill="#34A853" d="M12 23c3.24 0 5.97-1.08 7.96-2.92l-3.6-2.8c-1.11.74-2.53 1.18-4.36 1.18-3.24 0-5.99-2.2-6.97-5.26l-3.6 2.8C3.4 20.35 7.35 23 12 23z" />
+            </svg>
+            <span className="font-extrabold text-blue-400">Onboard Instantly with Google</span>
+          </button>
         </form>
       </div>
 
@@ -492,11 +553,27 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
           </div>
 
           <p className="text-slate-400 leading-normal mb-3">
-            Deploying this Unitycore Ledger Node on <span className="text-white font-bold">Vercel</span> or <span className="text-white font-bold">GitHub Pages</span>? Connect to your <span className="text-white font-bold">Supabase</span> or <span className="text-white font-bold">phpMyAdmin / MySQL</span> database instances easily. Configure your live connector driver below:
+            Integrating this Unitycore Ledger Node? Connect to <span className="text-white font-bold">Firebase</span>, <span className="text-white font-bold">Supabase</span> or use a local secure sandbox. Configure your active database driver:
           </p>
 
           {/* Database Driver Toggle Buttons */}
-          <div className="grid grid-cols-2 gap-2 mb-4">
+          <div className="grid grid-cols-3 gap-1.5 mb-4">
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem("active_db_driver", "firebase");
+                alert("Firebase driver selected as active live connector. Ensure your Firebase project configuration is loaded.");
+                window.location.reload();
+              }}
+              className={`py-2 px-1 rounded-lg border text-[10px] font-bold text-center cursor-pointer transition flex flex-col items-center justify-center gap-1 ${
+                getActiveMode() === "firebase"
+                  ? "bg-amber-950/20 border-amber-500/60 text-amber-400 font-extrabold"
+                  : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Database className="w-3.5 h-3.5" />
+              Firebase
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -504,14 +581,14 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
                 alert("Supabase driver selected as active live connector. Ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are configured.");
                 window.location.reload();
               }}
-              className={`py-2 px-3 rounded-lg border text-xs font-bold text-center cursor-pointer transition flex items-center justify-center gap-1.5 ${
+              className={`py-2 px-1 rounded-lg border text-[10px] font-bold text-center cursor-pointer transition flex flex-col items-center justify-center gap-1 ${
                 getActiveMode() === "supabase"
                   ? "bg-emerald-900/20 border-emerald-500/60 text-emerald-400 font-extrabold"
                   : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
               }`}
             >
-              <Server className="w-4 h-4" />
-              Supabase Cloud
+              <Server className="w-3.5 h-3.5" />
+              Supabase
             </button>
             <button
               type="button"
@@ -520,16 +597,86 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
                 alert("Switched to Secure Local Sandbox database driver. Accounts are securely isolated and persisted in browser storage.");
                 window.location.reload();
               }}
-              className={`py-2 px-3 rounded-lg border text-xs font-bold text-center cursor-pointer transition flex items-center justify-center gap-1.5 ${
+              className={`py-2 px-1 rounded-lg border text-[10px] font-bold text-center cursor-pointer transition flex flex-col items-center justify-center gap-1 ${
                 getActiveMode() === "fallback_secure"
                   ? "bg-blue-900/30 border-blue-500/60 text-blue-400 font-extrabold"
                   : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
               }`}
             >
-              <Settings2 className="w-4 h-4" />
+              <Settings2 className="w-3.5 h-3.5" />
               Secure Fallback
             </button>
           </div>
+
+          {/* Interactive Supabase configuration panel */}
+          {getActiveMode() === "supabase" && (
+            <div className="mt-1 mb-4 p-4 bg-slate-900 border border-emerald-500/40 rounded-xl space-y-3 font-sans">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-extrabold">
+                  <Server className="w-3.5 h-3.5" />
+                  <span>Supabase Credentials Setup</span>
+                </div>
+                <span className="text-[8px] bg-emerald-950 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider">ACTIVE</span>
+              </div>
+
+              <div className="space-y-2.5">
+                <div>
+                  <label className="block text-[9px] text-slate-400 uppercase tracking-wider font-extrabold mb-0.5">
+                    Supabase Project URL:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="https://your-project.supabase.co"
+                    value={supabaseUrlInput}
+                    onChange={(e) => setSupabaseUrlInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 leading-tight font-mono text-[10.5px] text-slate-200 focus:outline-none focus:border-emerald-500/60"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[9px] text-slate-400 uppercase tracking-wider font-extrabold mb-0.5">
+                    Supabase Anon Key:
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="your-anon-key-here..."
+                    value={supabaseAnonKeyInput}
+                    onChange={(e) => setSupabaseAnonKeyInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 leading-tight font-mono text-[10.5px] text-slate-200 focus:outline-none focus:border-emerald-500/60"
+                  />
+                </div>
+
+                <div className="flex gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={saveSupabaseCredentials}
+                    className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 py-1.5 px-2 rounded text-[11px] font-extrabold cursor-pointer transition text-center animate-fade-in"
+                  >
+                    Save & Load
+                  </button>
+                  <button
+                    type="button"
+                    onClick={testSupabaseConnection}
+                    disabled={isTestingConn}
+                    className="flex-1 bg-slate-950 hover:bg-slate-900 text-slate-300 border border-slate-800 py-1.5 px-2 rounded text-[11px] font-extrabold cursor-pointer transition text-center disabled:opacity-50"
+                  >
+                    {isTestingConn ? "Testing..." : "Test Connection"}
+                  </button>
+                </div>
+
+                {connTestResult && (
+                  <div className={`p-2.5 rounded text-[10px] font-mono leading-normal whitespace-pre-wrap ${
+                    connTestResult.success 
+                      ? "bg-emerald-950/30 border border-emerald-800/40 text-emerald-400" 
+                      : "bg-red-950/30 border border-red-900/40 text-red-400"
+                  }`}>
+                    {connTestResult.success ? "✅ " : "❌ "}
+                    {connTestResult.message}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Informative Accordion for Schemas */}
           <div className="space-y-3 mt-3 bg-[#070b14] border border-slate-800/60 rounded-xl p-4 font-mono text-[11px]">
@@ -540,14 +687,26 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
             
             <div className="space-y-1">
               <span className="text-emerald-400 font-bold block"># Postgres (Supabase SQL Console):</span>
-              <pre className="bg-slate-950 p-2.5 rounded text-[10px] text-slate-300 overflow-x-auto whitespace-pre leading-normal">
-{`CREATE TABLE users (
+              <pre className="bg-slate-950 p-2.5 rounded text-[9.5px] text-slate-300 overflow-x-auto whitespace-pre leading-normal max-h-[150px]">
+{`-- 1. Create Users profile ledger table
+CREATE TABLE users (
   id UUID PRIMARY KEY,
   email TEXT UNIQUE NOT NULL,
   username TEXT UNIQUE NOT NULL,
   name TEXT,
   role TEXT DEFAULT 'user',
   profile_data JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 2. Create Audit logs trail table
+CREATE TABLE audit_logs (
+  id TEXT PRIMARY KEY,
+  username TEXT,
+  user_id TEXT,
+  action TEXT,
+  details TEXT,
+  status TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );`}
               </pre>

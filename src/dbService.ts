@@ -384,15 +384,24 @@ export const dbService = {
           profile_data: defaultUser, // JSONB structure supports any future schema expansions cleanly!
         });
 
+        if (dbErr) {
+          console.error("[Supabase DB Error] Failed to write profile to 'users' table:", dbErr);
+          throw new Error(`Database Error: ${dbErr.message || "Unable to save your profile to the database table 'users'."}`);
+        }
+
         // Insert separate audit log Row if audit logs table exists
-        await supabase.from("audit_logs").insert({
-          id: `log-${Date.now()}`,
-          username: cleanUsername,
-          user_id: uid,
-          action: "ONBOARDING_COMPLETED",
-          details: "Created new secure ledger row via Supabase Client Identity.",
-          status: "success",
-        }); // Gracefully bypasses if table not created yet
+        try {
+          await supabase.from("audit_logs").insert({
+            id: `log-${Date.now()}`,
+            username: cleanUsername,
+            user_id: uid,
+            action: "ONBOARDING_COMPLETED",
+            details: "Created new secure ledger row via Supabase Client Identity.",
+            status: "success",
+          });
+        } catch (auditErr) {
+          console.warn("[Supabase] Failed to write initial audit log (audit_logs table may not exist):", auditErr);
+        }
 
         // Keep local cache in sync as backup
         saveUsersData([...localUsers, defaultUser]);
@@ -896,5 +905,52 @@ export const dbService = {
       }
     }
     return loadAuditLogs();
+  },
+
+  /**
+   * Test Supabase connection and verify tables exist
+   */
+  async testSupabaseConnection(): Promise<{ success: boolean; message: string }> {
+    if (!supabase) {
+      return {
+        success: false,
+        message: "Supabase client is not initialized. Please configure your VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY first.",
+      };
+    }
+    try {
+      // 1. Try querying users table to check schema validity
+      const { data, error } = await supabase.from("users").select("id").limit(1);
+      if (error) {
+        if (error.code === "PGRST116" || error.message?.includes("does not exist") || error.code === "42P01") {
+          return {
+            success: false,
+            message: "Successfully authenticated with Supabase, but the 'users' table is missing in your database. Please execute the SQL schema in your Supabase SQL Editor.",
+          };
+        }
+        throw error;
+      }
+      
+      // 2. Try querying audit_logs table
+      const { error: auditError } = await supabase.from("audit_logs").select("id").limit(1);
+      if (auditError) {
+        if (auditError.code === "PGRST116" || auditError.message?.includes("does not exist") || auditError.code === "42P01") {
+          return {
+            success: true,
+            message: "Connected successfully! The 'users' table is correctly set up. Note: The optional 'audit_logs' table is missing. Running the audit_logs SQL schema is recommended but optional.",
+          };
+        }
+      }
+
+      return {
+        success: true,
+        message: "Connection test fully successful! Both the 'users' and 'audit_logs' tables are configured and operational.",
+      };
+    } catch (err: any) {
+      console.error("[Supabase Connection Test Error]:", err);
+      return {
+        success: false,
+        message: `Connection failed: ${err.message || "Unknown error occurred connecting to Supabase."} (Check your URL and API Key)`,
+      };
+    }
   }
 };
