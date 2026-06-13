@@ -151,19 +151,6 @@ export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogle
           <p className="text-xs text-slate-400 mt-1">Sign in to access your account</p>
         </div>
 
-        {getActiveMode() === "firebase" && (
-          <div className="mb-5 p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center">
-            <span className="inline-flex items-center gap-1.5 text-amber-400 font-extrabold text-[10.5px] uppercase tracking-wide">
-              <Database className="w-3.5 h-3.5 animate-pulse" />
-              Firebase Cloud Database Active
-            </span>
-            <p className="text-[11px] text-slate-300 leading-normal mt-1">
-              Currently connected to the secure <span className="text-white font-semibold">Firebase Enterprise Cloud</span> database.
-              We recommend registering or signing in with Google for direct, zero-configuration sandbox access!
-            </p>
-          </div>
-        )}
-
         {/* Tab Selector Buttons */}
         <div className="flex border-b border-slate-800 mb-6">
           <button

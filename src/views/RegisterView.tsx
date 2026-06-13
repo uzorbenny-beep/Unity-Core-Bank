@@ -225,19 +225,6 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
           <p className="text-xs text-slate-400 mt-1">Configure your verified core ledger profile</p>
         </div>
 
-        {getActiveMode() === "firebase" && (
-          <div className="mb-5 p-3.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center font-sans">
-            <span className="inline-flex items-center gap-1.5 text-amber-400 font-extrabold text-[10.5px] uppercase tracking-wide">
-              <Database className="w-3.5 h-3.5 animate-pulse" />
-              Firebase Cloud Database Active
-            </span>
-            <p className="text-[11px] text-slate-300 leading-normal mt-1">
-              Currently connected to the secure <span className="text-white font-semibold">Firebase Enterprise Cloud</span> database.
-              We recommend using the <span className="text-blue-400 font-semibold">Google Sign-In</span> channel below to automatically verify credentials and set up your ledger in 1 click!
-            </p>
-          </div>
-        )}
-
         {/* Input Form Setup */}
         <form onSubmit={handleRegisterInput} className="space-y-4 font-sans">
           
