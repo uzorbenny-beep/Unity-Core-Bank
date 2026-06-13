@@ -98,6 +98,7 @@ export const INITIAL_USER: BankUser = {
   role: 'user',
   unreadNotifications: 2,
   avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256&auto=format&fit=crop', // James portrait from Screen 4
+  registrationTimestamp: new Date('2026-05-24T12:00:00-07:00').getTime(),
   accounts: [
     {
       id: 'acc-checking',

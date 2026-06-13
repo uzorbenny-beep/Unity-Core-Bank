@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 interface ChartPoint {
   label: string;
+  labelDetail?: string;
   value: number;
   rawStr: string;
 }
@@ -55,29 +56,44 @@ function useAnimatedNumber(targetValue: number, duration: number = 1000) {
   return currentValue;
 }
 
-const CHART_DATA: ChartPoint[] = [
-  { label: 'Mar 1', value: 160000, rawStr: '$160,000.00' },
-  { label: 'Mar 8', value: 185000, rawStr: '$185,000.00' },
-  { label: 'Mar 15', value: 172000, rawStr: '$172,000.00' },
-  { label: 'Mar 22', value: 205000, rawStr: '$205,000.00' },
-  { label: 'Mar 29', value: 198000, rawStr: '$198,000.00' },
-  { label: 'Apr 5', value: 215000, rawStr: '$215,000.00' },
-  { label: 'Apr 12', value: 208000, rawStr: '$208,000.00' },
-  { label: 'Apr 19', value: 218000, rawStr: '$218,000.00' },
-  { label: 'Apr 26', value: 212000, rawStr: '$212,000.00' },
-  { label: 'May 3', value: 224000, rawStr: '$224,000.00' },
-  { label: 'May 10', value: 220000, rawStr: '$220,000.00' },
-  { label: 'May 17', value: 225000, rawStr: '$225,000.00' },
-  { label: 'May 24', value: 227672.25, rawStr: '$227,672.25' },
-];
+// Helper to format timestamps using the active user timezone
+function formatTzDate(timestamp: number, showTime: boolean, timezone?: string): string {
+  try {
+    const date = new Date(timestamp);
+    const tzOptions = timezone && timezone !== 'auto' ? { timeZone: timezone } : {};
+    if (showTime) {
+      const dateStr = date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        ...tzOptions
+      });
+      const timeStr = date.toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        ...tzOptions
+      });
+      return `${dateStr} • ${timeStr}`;
+    } else {
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        ...tzOptions
+      });
+    }
+  } catch (err) {
+    console.error("Error formatting chart date:", err);
+    const d = new Date(timestamp);
+    return showTime ? d.toLocaleString() : d.toLocaleDateString();
+  }
+}
 
 interface FinancialChartProps {
   totalBalance?: number;
+  registrationTimestamp?: number;
 }
 
-export default function FinancialChart({ totalBalance }: FinancialChartProps) {
-  const [hoverIndex, setHoverIndex] = useState<number | null>(CHART_DATA.length - 1);
-
+export default function FinancialChart({ totalBalance, registrationTimestamp }: FinancialChartProps) {
   // Formatting helper
   const formatCurrency = (val: number) => {
     const isNegative = val < 0;
@@ -89,12 +105,40 @@ export default function FinancialChart({ totalBalance }: FinancialChartProps) {
     return isNegative ? `-${text}` : text;
   };
 
+  // Build the dynamic CHART_DATA array based on the registration time of the user!
+  const tz = (typeof localStorage !== 'undefined' ? localStorage.getItem('user_timezone') : null) || 'auto';
+  const timezoneParam = tz === 'auto' ? undefined : tz;
+
+  const userRegTime = registrationTimestamp || Date.now();
+
+  const RAW_VALUES = [
+    160000, 185000, 172000, 205000, 198000, 215000, 208000, 218000, 212000, 224050, 220000, 225000, 227672.25
+  ];
+
+  const dynamicChartData: ChartPoint[] = RAW_VALUES.map((val, idx) => {
+    // 13 points ending exactly at user's actual registration time, spaced 7 days apart
+    const daysOffset = (12 - idx) * 7;
+    const pointTime = userRegTime - (daysOffset * 24 * 3600 * 1000);
+    
+    const shortLabel = formatTzDate(pointTime, false, timezoneParam);
+    const detailLabel = formatTzDate(pointTime, idx === 12, timezoneParam);
+    
+    return {
+      label: shortLabel,
+      labelDetail: detailLabel,
+      value: val,
+      rawStr: formatCurrency(val)
+    };
+  });
+
+  const [hoverIndex, setHoverIndex] = useState<number | null>(dynamicChartData.length - 1);
+
   const liveTotal = totalBalance !== undefined ? totalBalance : 227672.25;
   const animatedTotal = useAnimatedNumber(liveTotal, 1000);
   const originalLastValue = 227672.25;
 
-  const scaledData = CHART_DATA.map((d, idx) => {
-    if (idx === CHART_DATA.length - 1) {
+  const scaledData = dynamicChartData.map((d, idx) => {
+    if (idx === dynamicChartData.length - 1) {
       return {
         ...d,
         value: animatedTotal,
@@ -158,7 +202,7 @@ export default function FinancialChart({ totalBalance }: FinancialChartProps) {
           <div className="text-3xl font-extrabold text-white tracking-tight mt-1 flex items-baseline">
             {activePoint.rawStr}
             <span className="text-xs text-blue-400 font-mono ml-2 font-normal">
-              {activePoint.label === 'May 24' ? 'May 24' : activePoint.label}
+              {activePoint.labelDetail || activePoint.label}
             </span>
           </div>
           <div className="flex items-center gap-1.5 mt-1 text-emerald-450 text-emerald-400 text-xs font-bold">
@@ -172,7 +216,7 @@ export default function FinancialChart({ totalBalance }: FinancialChartProps) {
         {/* Selected Data Pill */}
         {activePoint && (
           <div className="bg-slate-900 border border-slate-800 text-xs px-2.5 py-1 text-slate-300 rounded-lg pointer-events-none">
-            <span className="font-mono font-bold text-blue-400">{activePoint.label}</span>
+            <span className="font-mono font-bold text-blue-400">{activePoint.labelDetail || activePoint.label}</span>
             <span className="mx-1.5 text-slate-600">•</span>
             <span className="font-bold text-white">{activePoint.rawStr}</span>
           </div>
@@ -280,13 +324,13 @@ export default function FinancialChart({ totalBalance }: FinancialChartProps) {
 
       {/* Dynamic X Axis labels from Screen 4 */}
       <div className="flex justify-between px-6 text-[10px] font-medium text-slate-500 font-mono mt-1">
-        <span>Mar 8</span>
-        <span>Mar 22</span>
-        <span>Apr 5</span>
-        <span>Apr 19</span>
-        <span>May 3</span>
-        <span>May 17</span>
-        <span>May 24</span>
+        <span>{points[1]?.label || 'Mar 8'}</span>
+        <span>{points[3]?.label || 'Mar 22'}</span>
+        <span>{points[5]?.label || 'Apr 5'}</span>
+        <span>{points[7]?.label || 'Apr 19'}</span>
+        <span>{points[9]?.label || 'May 3'}</span>
+        <span>{points[11]?.label || 'May 17'}</span>
+        <span>{points[12]?.label || 'May 24'}</span>
       </div>
     </div>
   );

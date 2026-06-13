@@ -164,6 +164,7 @@ export const dbService = {
           role: "user",
           unreadNotifications: 1,
           avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256&auto=format&fit=crop",
+          registrationTimestamp: Date.now(),
           accounts: [
             {
               id: `acc-checking-${uid}`,
@@ -296,6 +297,7 @@ export const dbService = {
           role: "user",
           unreadNotifications: 1,
           avatarUrl: "https://images.unsplash.com/photo-1534528741775-53994a69daeb?q=80&w=256&auto=format&fit=crop",
+          registrationTimestamp: Date.now(),
           accounts: [
             {
               id: `acc-checking-${uid}`,
@@ -431,6 +433,7 @@ export const dbService = {
       role: "user",
       unreadNotifications: 1,
       avatarUrl: "https://images.unsplash.com/photo-1544005313-94ddf0286df2?q=80&w=256&auto=format&fit=crop",
+      registrationTimestamp: Date.now(),
       accounts: [
         {
           id: `acc-checking-${fallbackId}`,

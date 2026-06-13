@@ -108,6 +108,7 @@ export interface BankUser {
   password?: string;
   iban?: string;
   notifications?: BankNotification[];
+  registrationTimestamp?: number;
 }
 
 export interface BankNotification {

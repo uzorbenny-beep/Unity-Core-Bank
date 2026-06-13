@@ -2176,7 +2176,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
 
             {/* Total balance micro metric box and charts */}
             <div className="relative">
-              <FinancialChart totalBalance={computedTotal} />
+              <FinancialChart totalBalance={computedTotal} registrationTimestamp={currentUser.registrationTimestamp} />
             </div>
 
             {/* My Accounts Row (Matches Screen 4 bottom header) */}
