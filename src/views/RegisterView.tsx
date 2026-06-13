@@ -194,26 +194,6 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
 
       {/* Elegant Registration Card */}
       <div className="w-full max-w-xl bg-[#0f172a] border border-slate-800 rounded-3xl p-6 md:p-8 relative z-10 shadow-2xl my-auto animate-fade-in">
-        
-        {/* Switch database helper banner */}
-        {getActiveMode() !== "firebase" && (
-          <div className="mb-5 p-3 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-center">
-            <p className="text-[11px] text-amber-300 font-medium">
-              Unitycore is in <span className="text-white font-extrabold uppercase">{getActiveMode() === "fallback_secure" ? "local sandbox" : "supabase"}</span> mode.
-            </p>
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.setItem("active_db_driver", "firebase");
-                alert("Switched active database driver to Firebase Cloud database. Real-time Firebase Firestore is now active!");
-                window.location.reload();
-              }}
-              className="mt-2 w-full bg-amber-600 hover:bg-amber-700 active:scale-98 text-white font-extrabold text-[10px] py-1.5 px-3 rounded-xl transition duration-150 cursor-pointer shadow-sm animate-pulse"
-            >
-              Switch to Firebase Database (Recommended)
-            </button>
-          </div>
-        )}
 
         {/* Brand Header */}
         <div className="flex items-center justify-center gap-3.5 mb-6">
