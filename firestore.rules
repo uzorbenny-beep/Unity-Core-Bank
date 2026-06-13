@@ -12,6 +12,11 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    // Verified Users: For standard authenticated write operations
+    function isVerifiedUser() {
+      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.firebase.sign_in_provider == 'anonymous' || request.auth.token.firebase.sign_in_provider == 'google.com' || request.auth.token.firebase.sign_in_provider == 'password');
+    }
+
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
@@ -56,7 +61,11 @@ service cloud.firestore {
         (!('currency' in data) || (data.currency is string && data.currency.size() <= 16)) &&
         (!('transactionPin' in data) || (data.transactionPin is string && data.transactionPin.size() <= 16)) &&
         (!('password' in data) || (data.password is string && data.password.size() <= 256)) &&
-        (!('iban' in data) || (data.iban is string && data.iban.size() <= 64));
+        (!('iban' in data) || (data.iban is string && data.iban.size() <= 64)) &&
+        (!('avatarUrl' in data) || (data.avatarUrl is string && data.avatarUrl.size() <= 512)) &&
+        (!('registrationTimestamp' in data) || (data.registrationTimestamp is number)) &&
+        (!('transactions' in data) || (data.transactions is list && data.transactions.size() <= 200)) &&
+        (!('notifications' in data) || (data.notifications is list && data.notifications.size() <= 200));
     }
 
     function isValidTransaction(data) {
@@ -103,7 +112,7 @@ service cloud.firestore {
            'accounts', 'cards', 'unreadNotifications', 'savingsGoals', 'billers', 
            'supportTickets', 'name', 'username', 'email', 'avatarUrl', 'legalFirstName', 'middleName', 
            'legalLastName', 'phoneNumber', 'country', 'typeOfAccount', 'currency', 
-           'transactionPin', 'password', 'iban'
+           'transactionPin', 'password', 'iban', 'transactions', 'registrationTimestamp', 'notifications'
          ])) ||
         (isAdmin() && 
          isValidUser(incoming()) && 

@@ -102,6 +102,51 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
   const [profileUpdateSuccess, setProfileUpdateSuccess] = useState('');
   const [profileUpdateError, setProfileUpdateError] = useState('');
 
+  // Profile Picture (Avatar) States & Handler
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
+  const [avatarError, setAvatarError] = useState('');
+
+  const handleUpdateAvatar = async (newUrl: string) => {
+    if (!newUrl) return;
+    try {
+      setAvatarError('');
+      const allUsers = loadUsersData();
+      const updatedList = allUsers.map((u) => {
+        if (u.id === currentUser.id) {
+          return {
+            ...u,
+            avatarUrl: newUrl,
+          };
+        }
+        return u;
+      });
+      saveUsersData(updatedList);
+
+      // Save to Firebase if enabled
+      try {
+        const { getActiveMode } = await import('../../dbService');
+        if (getActiveMode() === "firebase") {
+          const { db } = await import('../../firebase');
+          const { doc, updateDoc } = await import('firebase/firestore');
+          if (db) {
+            const userDocRef = doc(db, 'users', currentUser.id);
+            await updateDoc(userDocRef, {
+              avatarUrl: newUrl
+            });
+          }
+        }
+      } catch (fErr) {
+        console.warn("Firestore update skipped or offline:", fErr);
+      }
+
+      onRefreshUser(currentUser.id);
+      addAuditLog(currentUser.username, currentUser.id, 'PROFILE_AVATAR_UPDATE', 'Successfully updated security display photo.');
+      setShowAvatarModal(false);
+    } catch (err: any) {
+      setAvatarError(err.message || 'Failed to update avatar photo.');
+    }
+  };
+
   const [showProfilePassword, setShowProfilePassword] = useState(false);
   const [showProfilePin, setShowProfilePin] = useState(false);
   const [copiedIban, setCopiedIban] = useState(false);
@@ -586,8 +631,9 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         const userChecking = allUsers[userIdx].accounts.find(a => a.type === 'checking');
         const userInvestment = allUsers[userIdx].accounts.find(a => a.type === 'investment');
         if (userChecking && userInvestment) {
-          userChecking.balance -= amount;
-          userInvestment.balance += amount;
+          // Do NOT adjust balances yet since it requires admin confirmation!
+          // userChecking.balance -= amount;
+          // userInvestment.balance += amount;
           
           const dailyRates = { starter: 2.0, silver: 5.0, gold: 10.0, sapphire: 20.0 };
           const planNames = { starter: 'Starter Package', silver: 'Silver Accumulator', gold: 'Gold Vanguard', sapphire: 'Pioneer Sapphire Elite' };
@@ -600,26 +646,28 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
             startDate: 'Today',
             daysRemaining: 30,
             currentEarnings: 0,
-            status: 'Active' as const
+            status: 'Active' as const // local session view
           };
 
-          // Append transaction item
+          // Append transaction item with status 'pending'
           const newTx: Transaction = {
             id: `tx-inv-${Date.now()}`,
             description: `Funded ${planNames[investPlan]}`,
             amount: -amount,
             date: formatTransactionDate(Date.now()),
             timestamp: Date.now(),
-            category: 'transfer' as const
+            category: 'transfer' as const,
+            status: 'pending',
+            targetAccountId: userChecking.id
           };
 
           allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
           saveUsersData(allUsers);
-          addAuditLog(currentUser.username, currentUser.id, 'INVEST_CREATE', `Funded ${planNames[investPlan]} with ${amount}`);
+          addAuditLog(currentUser.username, currentUser.id, 'INVEST_CREATE', `Requested funding of ${planNames[investPlan]} with ${amount}. Pending admin authorization.`);
           
           setInvestmentsList([newInv, ...investmentsList]);
           setInvestAmount('');
-          setInvestSuccessMsg(`Investment created successfully! $${amount} has been locked into the ${planNames[investPlan]}.`);
+          setInvestSuccessMsg(`Investment request submitted! $${amount} has been queued and awaits Admin verification before execution.`);
           triggerStateRefresh();
         }
       }
@@ -663,41 +711,25 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       const allUsers = loadUsersData();
       const userIdx = allUsers.findIndex(u => u.id === currentUser.id);
       if (userIdx !== -1) {
-        if (cryptoFrom === 'USD') {
-          const userChecking = allUsers[userIdx].accounts.find(a => a.type === 'checking');
-          if (userChecking) userChecking.balance -= amount;
-        } else {
-          setCryptoWallets(prev => ({
-            ...prev,
-            [cryptoFrom]: prev[cryptoFrom] - amount
-          }));
-        }
-
-        if (cryptoTo === 'USD') {
-          const userChecking = allUsers[userIdx].accounts.find(a => a.type === 'checking');
-          if (userChecking) userChecking.balance += targetReceivedAmount;
-        } else {
-          setCryptoWallets(prev => ({
-            ...prev,
-            [cryptoTo]: prev[cryptoTo] + targetReceivedAmount
-          }));
-        }
-
+        // Do NOT adjust balances yet since it requires admin confirmation!
+        const userChecking = allUsers[userIdx].accounts.find(a => a.type === 'checking');
         const newTx: Transaction = {
           id: `tx-swap-${Date.now()}`,
           description: `Crypto Swapped ${cryptoFrom} to ${cryptoTo}`,
           amount: cryptoFrom === 'USD' ? -amount : cryptoTo === 'USD' ? targetReceivedAmount : 0,
           date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
-          category: 'transfer' as const
+          category: 'transfer' as const,
+          status: 'pending',
+          targetAccountId: userChecking ? userChecking.id : undefined
         };
 
         allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
         saveUsersData(allUsers);
-        addAuditLog(currentUser.username, currentUser.id, 'CRYPTO_SWAP', `Exchanged ${amount} ${cryptoFrom} to ${targetReceivedAmount} ${cryptoTo}`);
+        addAuditLog(currentUser.username, currentUser.id, 'CRYPTO_SWAP', `Requested exchange of ${amount} ${cryptoFrom} to ${targetReceivedAmount} ${cryptoTo}. Pending admin approval.`);
         
         setCryptoAmount('');
-        setCryptoSwapSuccess(`Swapped ${amount} ${cryptoFrom} dynamically. Credited ${targetReceivedAmount.toFixed(6)} ${cryptoTo} to your Secure Wallet.`);
+        setCryptoSwapSuccess(`Swap transaction generated! Swapping ${amount} ${cryptoFrom} to ${cryptoTo} is now pending administrative authorization.`);
         triggerStateRefresh();
       }
     });
@@ -734,7 +766,8 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           const userChecking = allUsers[userIdx].accounts.find(a => a.type === 'checking');
           if (userChecking) {
             const parsedAmt = parseFloat(grantAmountStr);
-            userChecking.balance += parsedAmt;
+            // Do NOT adjust balance yet since it requires admin confirmation!
+            // userChecking.balance += parsedAmt;
 
             const newTx: Transaction = {
               id: `tx-grant-${Date.now()}`,
@@ -742,12 +775,14 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
               amount: parsedAmt,
               date: formatTransactionDate(Date.now()),
               timestamp: Date.now(),
-              category: 'salary' as const
+              category: 'salary' as const,
+              status: 'pending',
+              targetAccountId: userChecking.id
             };
 
             allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
             saveUsersData(allUsers);
-            addAuditLog(currentUser.username, currentUser.id, 'GRANT_APPROVED', `Received $${parsedAmt} capital grant support`);
+            addAuditLog(currentUser.username, currentUser.id, 'GRANT_APPROVED', `Submitted capital grant request of $${parsedAmt}. Pending admin confirmation.`);
             
             setGrantStep(3);
             setGrantReason('');
@@ -919,9 +954,9 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       setTransferProcessing(true);
 
       setTimeout(() => {
-        // Carry out balances transaction
-        sourceAcc.balance -= amount;
-        destAcc.balance += amount;
+        // Do NOT adjust balances yet since it requires admin confirmation!
+        // sourceAcc.balance -= amount;
+        // destAcc.balance += amount;
 
         const newTx: Transaction = {
           id: `tx-trsf-${Date.now()}`,
@@ -929,33 +964,25 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           amount: -amount,
           date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
-          category: transferCategory
+          category: transferCategory,
+          status: 'pending',
+          targetAccountId: sourceAcc.id
         };
         allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
 
-        const depositTx: Transaction = {
-          id: `tx-trsf-dep-${Date.now()}`,
-          description: `Transfer from ${sourceAcc.name}`,
-          amount: amount,
-          date: formatTransactionDate(Date.now()),
-          timestamp: Date.now(),
-          category: transferCategory
-        };
-        allUsers[userIdx].transactions = [depositTx, ...allUsers[userIdx].transactions];
-
         saveUsersData(allUsers);
-        addAuditLog(currentUser.username, currentUser.id, 'TRANSFER_INTERNAL', `Transferred ${formatCurrency(amount)} from ${sourceAcc.name} to ${destAcc.name}`);
+        addAuditLog(currentUser.username, currentUser.id, 'TRANSFER_INTERNAL', `Requested transfer of ${formatCurrency(amount)} from ${sourceAcc.name} to ${destAcc.name}. Pending admin approval.`);
         
         // Dispatch Transaction Notification
         notificationService.sendTransactionAlert(
           allUsers[userIdx],
           amount,
-          `Internal Transfer to ${destAcc.name}`,
+          `Internal Transfer to ${destAcc.name} (Pending Clearance)`,
           'debit'
         ).catch(err => console.error("Error sending tx alert:", err));
 
         setTransferProcessing(false);
-        setTransferSuccessMsg(`Successfully completed internal transfer of ${formatCurrency(amount)}!`);
+        setTransferSuccessMsg(`Transfer request submitted! Completed internal transfer request of ${formatCurrency(amount)} pending admin approval.`);
         setTransferAmount('');
         triggerStateRefresh();
       }, 1200);
@@ -977,7 +1004,8 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       setTransferProcessing(true);
 
       setTimeout(() => {
-        sourceAcc.balance -= amount;
+        // Do NOT adjust balances yet since it requires admin confirmation!
+        // sourceAcc.balance -= amount;
 
         const newTx: Transaction = {
           id: `tx-trsf-ext-${Date.now()}`,
@@ -985,23 +1013,25 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           amount: -amount,
           date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
-          category: transferCategory
+          category: transferCategory,
+          status: 'pending',
+          targetAccountId: sourceAcc.id
         };
         allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
 
         saveUsersData(allUsers);
-        addAuditLog(currentUser.username, currentUser.id, 'TRANSFER_EXTERNAL', `Wired ${formatCurrency(amount)} from ${sourceAcc.name} to ${recipientName} (${recipientAccount})`);
+        addAuditLog(currentUser.username, currentUser.id, 'TRANSFER_EXTERNAL', `Requested wire of ${formatCurrency(amount)} from ${sourceAcc.name} to ${recipientName} (${recipientAccount}). Pending admin approval.`);
 
         // Dispatch Transaction Notification
         notificationService.sendTransactionAlert(
           allUsers[userIdx],
           amount,
-          `External Wire to ${recipientName}`,
+          `External Wire to ${recipientName} (Pending Clearance)`,
           'debit'
         ).catch(err => console.error("Error sending tx alert:", err));
 
         setTransferProcessing(false);
-        setTransferSuccessMsg(`Successfully executed wire transfer of ${formatCurrency(amount)} to ${recipientName}!`);
+        setTransferSuccessMsg(`Wire transfer request submitted successfully! Payment of ${formatCurrency(amount)} to ${recipientName} is queued for admin approval.`);
         setTransferAmount('');
         setRecipientName('');
         setRecipientAccount('');
@@ -1055,8 +1085,9 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
 
         const recipientChecking = allUsers[recipientIdx].accounts.find(a => a.type === 'checking');
         if (recipientChecking) {
-          sourceAcc.balance -= amount;
-          recipientChecking.balance += amount;
+          // Do NOT adjust balances yet since it requires admin confirmation!
+          // sourceAcc.balance -= amount;
+          // recipientChecking.balance += amount;
 
           const senderTx: Transaction = {
             id: `tx-p2p-send-${Date.now()}`,
@@ -1065,41 +1096,23 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
             date: formatTransactionDate(Date.now()),
             timestamp: Date.now(),
             category: 'transfer',
-            status: 'successful'
+            status: 'pending',
+            targetAccountId: sourceAcc.id
           };
           allUsers[senderIdx].transactions = [senderTx, ...allUsers[senderIdx].transactions];
 
-          const recipientTx: Transaction = {
-            id: `tx-p2p-recv-${Date.now()}`,
-            description: `P2P recv from @${currentUser.username}`,
-            amount: amount,
-            date: formatTransactionDate(Date.now()),
-            timestamp: Date.now(),
-            category: 'transfer',
-            status: 'successful'
-          };
-          allUsers[recipientIdx].transactions = [recipientTx, ...allUsers[recipientIdx].transactions];
-
           saveUsersData(allUsers);
-          addAuditLog(currentUser.username, currentUser.id, 'P2P_TRANSFER_SUCCESS', `Successfully sent ${formatCurrency(amount)} to @${allUsers[recipientIdx].username}`);
-          addAuditLog(allUsers[recipientIdx].username, allUsers[recipientIdx].id, 'P2P_RECEIVE_SUCCESS', `Received P2P transfer of ${formatCurrency(amount)} from @${currentUser.username}`);
+          addAuditLog(currentUser.username, currentUser.id, 'P2P_TRANSFER_REQUEST', `Requested sending ${formatCurrency(amount)} to @${allUsers[recipientIdx].username}. Pending admin approval.`);
 
-          // Dispatch Transaction Alerts for both parties
+          // Dispatch Transaction Alerts for sender
           notificationService.sendTransactionAlert(
             allUsers[senderIdx],
             amount,
-            `P2P Send to @${allUsers[recipientIdx].username}`,
+            `P2P Send to @${allUsers[recipientIdx].username} (Pending Clearance)`,
             'debit'
           ).catch(err => console.error("Error sending p2p sender tx alert:", err));
 
-          notificationService.sendTransactionAlert(
-            allUsers[recipientIdx],
-            amount,
-            `P2P Received from @${currentUser.username}`,
-            'credit'
-          ).catch(err => console.error("Error sending p2p receiver tx alert:", err));
-
-          setTransferSuccessMsg(`P2P Instant Transfer complete! Sent ${formatCurrency(amount)} to @${allUsers[recipientIdx].username}.`);
+          setTransferSuccessMsg(`P2P transfer request submitted! Sending ${formatCurrency(amount)} to @${allUsers[recipientIdx].username} is pending administrative verification.`);
           setTransferAmount('');
           setP2pTarget('');
           triggerStateRefresh();
@@ -1179,7 +1192,8 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       const parentBiller = bl.find(b => b.id === billerId);
 
       if (acc && parentBiller) {
-        acc.balance -= parentBiller.amount;
+        // Do NOT adjust balance yet since it requires admin confirmation!
+        // acc.balance -= parentBiller.amount;
 
         const billTx: Transaction = {
           id: `tx-bill-${Date.now()}`,
@@ -1188,18 +1202,19 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           date: formatTransactionDate(Date.now()),
           timestamp: Date.now(),
           category: 'utilities',
-          status: 'successful'
+          status: 'pending',
+          targetAccountId: acc.id
         };
 
         freshUsers[idx].transactions = [billTx, ...freshUsers[idx].transactions];
         saveUsersData(freshUsers);
-        addAuditLog(currentUser.username, currentUser.id, 'BILL_PAY_SUCCESS', `Paid schedule bill of ${formatCurrency(parentBiller.amount)} to ${parentBiller.name}`);
+        addAuditLog(currentUser.username, currentUser.id, 'BILL_PAY_REQUEST', `Submitted payment request of ${formatCurrency(parentBiller.amount)} to ${parentBiller.name}. Pending administrative approval.`);
 
         // Dispatch Biller Alert
         notificationService.sendBillerAlert(freshUsers[idx], parentBiller.name, parentBiller.amount)
           .catch(err => console.error("Error creating bill alert notification:", err));
 
-        setTransferSuccessMsg(`Payment of ${formatCurrency(parentBiller.amount)} has been successfully wired and acknowledged by ${parentBiller.name}.`);
+        setTransferSuccessMsg(`Payment of ${formatCurrency(parentBiller.amount)} queued! Bill payment request has been sent to the admin for manual approval.`);
         triggerStateRefresh();
       }
     });
@@ -1335,9 +1350,9 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       return;
     }
 
-    // Process the transfer!
-    sourceAcc.balance -= amount;
-    goalList[goalIndex].currentAmount += amount;
+    // Do NOT adjust balances yet since it requires admin confirmation!
+    // sourceAcc.balance -= amount;
+    // goalList[goalIndex].currentAmount += amount;
 
     const tx: Transaction = {
       id: `tx-vault-${Date.now()}`,
@@ -1346,18 +1361,19 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       date: formatTransactionDate(Date.now()),
       timestamp: Date.now(),
       category: 'transfer',
-      status: 'successful'
+      status: 'pending',
+      targetAccountId: sourceAcc.id
     };
 
     allUsers[userIdx].transactions = [tx, ...allUsers[userIdx].transactions];
     saveUsersData(allUsers);
-    addAuditLog(currentUser.username, currentUser.id, 'SAVINGS_GOAL_FUND', `Allocated ${formatCurrency(amount)} from ${sourceAcc.name} to vault ${goalList[goalIndex].name}`);
+    addAuditLog(currentUser.username, currentUser.id, 'SAVINGS_GOAL_FUND', `Requested allocation of ${formatCurrency(amount)} from ${sourceAcc.name} to vault ${goalList[goalIndex].name}. Pending admin approval.`);
     
     setSelectedVaultId(null);
     setFundVaultSourceId('');
     setFundVaultAmount('');
     setShowFundVaultModal(false);
-    alert(`Transfer complete! ${formatCurrency(amount)} successfully allocated to your Savings Vault.`);
+    alert(`Transfer request submitted! Allocation of ${formatCurrency(amount)} to your Savings Vault is now pending administrative approval.`);
     triggerStateRefresh();
   };
 
@@ -3561,13 +3577,21 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
             
             {/* User profile Summary info card */}
             <div className="bg-white border border-slate-200 p-6 rounded-2xl flex flex-col md:flex-row items-center gap-5 shadow-xs">
-              <div className="w-20 h-20 rounded-full border-2 border-indigo-600 overflow-hidden relative group shrink-0">
+              <div 
+                className="w-20 h-20 rounded-full border-2 border-indigo-600 overflow-hidden relative group shrink-0 cursor-pointer"
+                onClick={() => setShowAvatarModal(true)}
+                title="Click to change profile picture"
+              >
                 <img 
                   src={currentUser.avatarUrl} 
                   alt={currentUser.name} 
-                  className="w-full h-full object-cover" 
+                  className="w-full h-full object-cover group-hover:opacity-30 transition-opacity duration-200" 
                   referrerPolicy="no-referrer"
                 />
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-indigo-950/80 opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-white select-none">
+                  <span className="text-sm">📸</span>
+                  <span className="text-[9px] font-bold tracking-widest uppercase font-sans mt-0.5">Edit</span>
+                </div>
               </div>
 
               <div className="text-center md:text-left flex-1">
@@ -4186,7 +4210,8 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                   if (userIdx !== -1) {
                     const matchAcc = allUsers[userIdx].accounts.find(a => a.id === wireTargetAccount);
                     if (matchAcc) {
-                      matchAcc.balance -= (amount + 15);
+                      // Do NOT adjust balance yet since it requires admin confirmation!
+                      // matchAcc.balance -= (amount + 15);
                       
                       const newTx: Transaction = {
                         id: `tx-swift-${Date.now()}`,
@@ -4194,7 +4219,9 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                         amount: -amount,
                         date: formatTransactionDate(Date.now()),
                         timestamp: Date.now(),
-                        category: 'transfer'
+                        category: 'transfer',
+                        status: 'pending',
+                        targetAccountId: matchAcc.id
                       };
                       
                       const feeTx: Transaction = {
@@ -4203,15 +4230,17 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                         amount: -15,
                         date: formatTransactionDate(Date.now()),
                         timestamp: Date.now(),
-                        category: 'other'
+                        category: 'other',
+                        status: 'pending',
+                        targetAccountId: matchAcc.id
                       };
 
                       allUsers[userIdx].transactions = [newTx, feeTx, ...allUsers[userIdx].transactions];
                       saveUsersData(allUsers);
-                      addAuditLog(currentUser.username, currentUser.id, 'WIRE_TRANSFER', `Authorized wire of ${formatCurrency(amount)} to ${wireBeneficiary}`);
+                      addAuditLog(currentUser.username, currentUser.id, 'WIRE_TRANSFER', `Requested international wire of ${formatCurrency(amount)} to ${wireBeneficiary}. Pending admin approval.`);
                       
                       triggerStateRefresh();
-                      setWireSuccessMsg(`Successfully routed ${formatCurrency(amount)} to ${wireBeneficiary} in country code: ${wireCountry.toUpperCase()}. Funds will settle on target node in 24 hours. SWIFT reference lock generated.`);
+                      setWireSuccessMsg(`SWIFT transfer request submitted successfully! Wire of ${formatCurrency(amount)} to ${wireBeneficiary} and cross-border fee ($15.00) are pending manual administrative clearance.`);
                       setWireAmount('');
                       setWireSwift('');
                       setWireBeneficiary('');
@@ -4674,7 +4703,8 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                   if (userIdx !== -1) {
                     const matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
                     if (matchAcc) {
-                      matchAcc.balance += principal;
+                      // Do NOT adjust balance yet since it requires admin confirmation!
+                      // matchAcc.balance += principal;
                       
                       const newTx: Transaction = {
                         id: `tx-loan-${Date.now()}`,
@@ -4682,12 +4712,14 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                         amount: principal,
                         date: formatTransactionDate(Date.now()),
                         timestamp: Date.now(),
-                        category: 'other'
+                        category: 'other',
+                        status: 'pending',
+                        targetAccountId: matchAcc.id
                       };
 
                       allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
                       saveUsersData(allUsers);
-                      addAuditLog(currentUser.username, currentUser.id, 'LOAN_ISSUED', `Disbursed loan of ${formatCurrency(principal)} to checking`);
+                      addAuditLog(currentUser.username, currentUser.id, 'LOAN_ISSUED', `Requested loan of ${formatCurrency(principal)} to checking. Pending admin approval.`);
 
                       const rate = loanCategory === 'personal' ? 7.5 : loanCategory === 'vehicle' ? 5.5 : loanCategory === 'business' ? 6.2 : 4.8;
                       const termInt = parseInt(loanTerm);
@@ -4701,13 +4733,13 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                           rate: rate,
                           term: termInt,
                           monthlyPayment: Math.round(monthlyPaymentVal * 100) / 100,
-                          status: 'Active'
+                          status: 'Pending'
                         },
                         ...loansList
                       ]);
 
                       triggerStateRefresh();
-                      setLoanSuccessMsg(`Instant algorithmic screening complete! Standard score pre-approved. Loan amount ${formatCurrency(principal)} credited instantly to your Primary Checking Account.`);
+                      setLoanSuccessMsg(`Instant screening complete! Algorithmic pre-acceptance issued. Loan request of ${formatCurrency(principal)} is now pending manual administrative approval.`);
                       setLoanAmount('15000');
                     }
                   }
@@ -4897,7 +4929,8 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                             const matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
                             if (matchAcc) {
                               const refundVal = parseFloat(irsExpectedAmount) || 3050;
-                              matchAcc.balance += refundVal;
+                              // Do NOT adjust balance yet since it requires admin confirmation!
+                              // matchAcc.balance += refundVal;
                               
                               const newTx: Transaction = {
                                 id: `tx-irs-${Date.now()}`,
@@ -4905,12 +4938,14 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                                 amount: refundVal,
                                 date: formatTransactionDate(Date.now()),
                                 timestamp: Date.now(),
-                                category: 'other'
+                                category: 'other',
+                                status: 'pending',
+                                targetAccountId: matchAcc.id
                               };
 
                               allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
                               saveUsersData(allUsers);
-                              addAuditLog(currentUser.username, currentUser.id, 'DEPOSIT', `Filing match refund ${formatCurrency(refundVal)} deposited`);
+                              addAuditLog(currentUser.username, currentUser.id, 'DEPOSIT', `Requested tax refund direct deposit of ${formatCurrency(refundVal)}. Pending admin verification.`);
                               triggerStateRefresh();
                             }
                           }
@@ -5081,21 +5116,24 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                 <button
                   onClick={() => {
                     const userMsg = "Dispute a double-charge billing";
-                    const botReply = "Sandbox Dispute Resolution: Refund dispatched for your last payment. $52.50 has been provisionally credited to your checking account instantly.";
+                    const botReply = "Sandbox Dispute Resolution: Dispute submitted. $52.50 provisional credit request has been queued and is pending admin approval.";
                     
                     const allUsers = loadUsersData();
                     const userIdx = allUsers.findIndex(u => u.id === currentUser.id);
                     if (userIdx !== -1) {
                       const matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
                       if (matchAcc) {
-                        matchAcc.balance += 52.50;
+                        // Do NOT adjust balance yet since it requires admin confirmation!
+                        // matchAcc.balance += 52.50;
                         const newTx: Transaction = {
                           id: `tx-disp-${Date.now()}`,
                           description: 'ATM DISPUTE CREDIT: PROVISIONAL REVERSAL',
                           amount: 52.50,
                           date: formatTransactionDate(Date.now()),
                           timestamp: Date.now(),
-                          category: 'other'
+                          category: 'other',
+                          status: 'pending',
+                          targetAccountId: matchAcc.id
                         };
                         allUsers[userIdx].transactions = [newTx, ...allUsers[userIdx].transactions];
                         saveUsersData(allUsers);
@@ -6062,6 +6100,142 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
               </span>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* 📸 INTERACTIVE AVATAR SELECTOR / PROFILE PICTURE MANAGER MODAL */}
+      {showAvatarModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-xs font-sans text-slate-800">
+          <div className="bg-white border border-slate-200 w-full max-w-md rounded-3xl p-6 shadow-2xl relative text-left animate-scale-up space-y-5">
+            {/* Modal header */}
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 uppercase tracking-wide">Update Profile Picture</h3>
+                <p className="text-[10px] text-slate-500 mt-0.5">Choose a beautiful preset, upload a local file, or paste an image link</p>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowAvatarModal(false);
+                  setAvatarError('');
+                }}
+                className="text-slate-400 hover:text-slate-700 transition w-8 h-8 rounded-full bg-slate-50 hover:bg-slate-100 flex items-center justify-center cursor-pointer text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {avatarError && (
+              <div className="bg-rose-50 border border-rose-100 text-rose-800 text-[11px] px-3.5 py-2 rounded-xl text-center font-semibold">
+                ⚠️ {avatarError}
+              </div>
+            )}
+
+            {/* Choose interactive option */}
+            <div className="space-y-4">
+              {/* Option A: Presets list */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider font-mono">Option A: Premium Face Presets</span>
+                <div className="grid grid-cols-6 gap-2">
+                  {[
+                    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=150", 
+                    "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=150", 
+                    "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=150", 
+                    "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=150", 
+                    "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=150", 
+                    "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=150", 
+                  ].map((url, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleUpdateAvatar(url)}
+                      className="w-12 h-12 rounded-full overflow-hidden border-2 border-transparent hover:border-indigo-600 active:scale-95 transition shrink-0 cursor-pointer"
+                    >
+                      <img src={url} alt={`Preset ${idx + 1}`} className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Option B: Client Base64 Drag & Drop Upload */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider font-mono">Option B: Drag & Drop File Selector</span>
+                <div 
+                  className="border-2 border-dashed border-slate-200 hover:border-indigo-500 rounded-2xl p-5 text-center cursor-pointer transition flex flex-col items-center justify-center bg-slate-50/50 group"
+                  onDragOver={(e) => { e.preventDefault(); e.currentTarget.classList.add('border-indigo-500', 'bg-indigo-50/10'); }}
+                  onDragLeave={(e) => { e.preventDefault(); e.currentTarget.classList.remove('border-indigo-500', 'bg-indigo-50/10'); }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    e.currentTarget.classList.remove('border-indigo-500', 'bg-indigo-50/10');
+                    const files = e.dataTransfer.files;
+                    if (files && files[0]) {
+                      const file = files[0];
+                      if (!file.type.startsWith('image/')) {
+                        setAvatarError('Only image file uploads (JPEG, PNG, WEBP) are supported.');
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = (event) => {
+                        if (event.target?.result) {
+                          handleUpdateAvatar(event.target.result as string);
+                        }
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  }}
+                  onClick={() => document.getElementById('avatar-file-input')?.click()}
+                >
+                  <span className="text-2xl mb-1.5 group-hover:scale-110 transition-transform">📤</span>
+                  <p className="text-xs font-semibold text-slate-700">Drag an image file here or <span className="text-indigo-600 underline">browse</span></p>
+                  <p className="text-[9px] text-slate-400 mt-1 mt-0.5">Supports JPEG, PNG, WEBP up to 4MB</p>
+                  <input 
+                    type="file" 
+                    id="avatar-file-input" 
+                    accept="image/*" 
+                    className="hidden" 
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        const reader = new FileReader();
+                        reader.onload = (event) => {
+                          if (event.target?.result) {
+                            handleUpdateAvatar(event.target.result as string);
+                          }
+                        };
+                        reader.readAsDataURL(file);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Option C: Image URL input */}
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider font-mono">Option C: Remote Image Link</span>
+                <div className="flex gap-2">
+                  <input 
+                    type="url" 
+                    placeholder="https://example.com/my-photo.jpg" 
+                    id="avatar-link-field"
+                    className="flex-1 bg-slate-50 border border-slate-200 outline-none rounded-xl py-2 px-3 text-xs text-slate-800 focus:border-indigo-500 font-medium font-mono"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const input = document.getElementById('avatar-link-field') as HTMLInputElement;
+                      if (input && input.value.trim() && input.value.includes('http')) {
+                        handleUpdateAvatar(input.value.trim());
+                      } else {
+                        setAvatarError('Please enter a valid HTTP/HTTPS image URL.');
+                      }
+                    }}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition cursor-pointer shrink-0"
+                  >
+                    Submit
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

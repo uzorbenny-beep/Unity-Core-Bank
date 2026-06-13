@@ -207,6 +207,20 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
   const [checkingInputBalance, setCheckingInputBalance] = useState('');
   const [savingsInputBalance, setSavingsInputBalance] = useState('');
   const [editSuccessMsg, setEditSuccessMsg] = useState('');
+  
+  // Additional custom user editing states (Admin side)
+  const [editUserFirstName, setEditUserFirstName] = useState('');
+  const [editUserMiddleName, setEditUserMiddleName] = useState('');
+  const [editUserLastName, setEditUserLastName] = useState('');
+  const [editUserEmail, setEditUserEmail] = useState('');
+  const [editUserPhone, setEditUserPhone] = useState('');
+  const [editUserCountry, setEditUserCountry] = useState('');
+  const [editUserRole, setEditUserRole] = useState<'user' | 'admin'>('user');
+  const [editUserPin, setEditUserPin] = useState('');
+  const [editUserPassword, setEditUserPassword] = useState('');
+  const [creditInputBalance, setCreditInputBalance] = useState('');
+  const [investInputBalance, setInvestInputBalance] = useState('');
+  const [editUserIban, setEditUserIban] = useState('');
 
   // User registration state (Admin side)
   const [showRegModal, setShowRegModal] = useState(false);
@@ -244,37 +258,120 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
     onRefreshData();
   };
 
-  // Modify Balance Executions
-  const handleModifyBalances = (e: React.FormEvent) => {
+  // Modify Balance & Account Parameters Executions
+  const handleModifyBalances = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedEditUser) return;
 
-    const checkingVal = parseFloat(checkingInputBalance);
-    const savingsVal = parseFloat(savingsInputBalance);
-
-    if (isNaN(checkingVal) || isNaN(savingsVal)) {
-      alert('Please enter valid numerical values for balances.');
-      return;
-    }
+    const checkingVal = parseFloat(checkingInputBalance) || 0;
+    const savingsVal = parseFloat(savingsInputBalance) || 0;
+    const creditVal = parseFloat(creditInputBalance) || 0;
+    const investVal = parseFloat(investInputBalance) || 0;
 
     const allUsers = loadUsersData();
     const targetIdx = allUsers.findIndex(u => u.id === selectedEditUser.id);
     if (targetIdx !== -1) {
-      const checkingAcc = allUsers[targetIdx].accounts.find(a => a.type === 'checking');
-      const savingsAcc = allUsers[targetIdx].accounts.find(a => a.type === 'savings');
+      // Modify accounts or create if they don't exist yet!
+      let checkingAcc = allUsers[targetIdx].accounts.find(a => a.type === 'checking');
+      if (checkingAcc) {
+        checkingAcc.balance = checkingVal;
+      } else {
+        allUsers[targetIdx].accounts.push({
+          id: 'acc-checking',
+          name: 'Primary Checking Account',
+          type: 'checking',
+          balance: checkingVal,
+          lastFour: '8821',
+          available: true
+        });
+      }
 
-      if (checkingAcc) checkingAcc.balance = checkingVal;
-      if (savingsAcc) savingsAcc.balance = savingsVal;
+      let savingsAcc = allUsers[targetIdx].accounts.find(a => a.type === 'savings');
+      if (savingsAcc) {
+        savingsAcc.balance = savingsVal;
+      } else {
+        allUsers[targetIdx].accounts.push({
+          id: 'acc-savings',
+          name: 'High-Yield Savings Lock',
+          type: 'savings',
+          balance: savingsVal,
+          lastFour: '5012',
+          available: true
+        });
+      }
+
+      let creditAcc = allUsers[targetIdx].accounts.find(a => a.type === 'credit');
+      if (creditAcc) {
+        creditAcc.balance = creditVal;
+      } else {
+        allUsers[targetIdx].accounts.push({
+          id: 'acc-credit',
+          name: 'Pro-Limit Credit Ledger',
+          type: 'credit',
+          balance: creditVal,
+          lastFour: '3024',
+          available: true
+        });
+      }
+
+      let investAcc = allUsers[targetIdx].accounts.find(a => a.type === 'investment');
+      if (investAcc) {
+        investAcc.balance = investVal;
+      } else {
+        allUsers[targetIdx].accounts.push({
+          id: 'acc-investment',
+          name: 'Wealth Arbitrage Lock',
+          type: 'investment',
+          balance: investVal,
+          lastFour: '1337',
+          available: true
+        });
+      }
+
+      // Update personal details
+      allUsers[targetIdx].legalFirstName = editUserFirstName.trim();
+      allUsers[targetIdx].middleName = editUserMiddleName.trim();
+      allUsers[targetIdx].legalLastName = editUserLastName.trim();
+      allUsers[targetIdx].name = `${editUserFirstName.trim()} ${editUserMiddleName.trim() ? editUserMiddleName.trim() + ' ' : ''}${editUserLastName.trim()}`.trim() || allUsers[targetIdx].name;
+      allUsers[targetIdx].email = editUserEmail.trim();
+      allUsers[targetIdx].phoneNumber = editUserPhone.trim();
+      allUsers[targetIdx].country = editUserCountry.trim();
+      allUsers[targetIdx].role = editUserRole;
+      allUsers[targetIdx].iban = editUserIban.trim();
+      if (editUserPin.trim()) {
+        allUsers[targetIdx].transactionPin = editUserPin.trim();
+      }
+      if (editUserPassword.trim()) {
+        allUsers[targetIdx].password = editUserPassword.trim();
+      }
 
       saveUsersData(allUsers);
+
+      // Sync update back to Firestore if in Firebase mode
+      try {
+        const { getActiveMode } = await import('../../dbService');
+        const { db } = await import('../../firebase');
+        const { doc, setDoc } = await import('firebase/firestore');
+
+        if (getActiveMode() === 'firebase' && db) {
+          console.log('[Firebase Admin Action] Updating user doc in Firestore:', selectedEditUser.id);
+          const userRef = doc(db, 'users', selectedEditUser.id);
+          const cleanUser = JSON.parse(JSON.stringify(allUsers[targetIdx]));
+          await setDoc(userRef, cleanUser, { merge: true });
+          console.log('[Firebase Admin Action] Sync successful.');
+        }
+      } catch (err) {
+        console.warn('[Firebase Sync Warning] Failed to update Firestore profile: ', err);
+      }
+
       addAuditLog(
         currentAdmin.username, 
         currentAdmin.id, 
-        'USER_BALANCE_ADMIN_MOD', 
-        `Overrode checking for user ${selectedEditUser.username} to $${checkingVal} and savings to $${savingsVal}`
+        'USER_ACCOUNT_ADMIN_MOD', 
+        `Overrode balances and profile configs for registered user: ${selectedEditUser.username}`
       );
 
-      setEditSuccessMsg(`Successfully overrode balances for user "${selectedEditUser.name}"!`);
+      setEditSuccessMsg(`Successfully updated balances and profile settings for user "${selectedEditUser.name}"!`);
       setSelectedEditUser(null);
       refreshLocalState();
 
@@ -431,6 +528,73 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
             }
             if (targetAcc) {
               targetAcc.balance += adjustment;
+            }
+
+            // Specialized balance adjustments for custom transaction flows requested:
+            // 1. Investment funding
+            if (transaction.id.startsWith('tx-inv-') || transaction.description.includes('Funded ')) {
+              const investmentAcc = allUsers[userIdx].accounts.find(a => a.type === 'investment');
+              if (investmentAcc) {
+                // If checking gets deducted by `adjustment` (which is negative), investment gets positive `adjustment`
+                investmentAcc.balance += -adjustment;
+              }
+            }
+
+            // 2. Internal Transfer destination credit rule
+            if (transaction.id.startsWith('tx-trsf-') && transaction.description.startsWith('Transfer to ')) {
+              const destName = transaction.description.replace('Transfer to ', '').trim();
+              const destAcc = allUsers[userIdx].accounts.find(a => a.name === destName);
+              if (destAcc) {
+                if (newStatus === 'successful') {
+                  destAcc.balance += Math.abs(transaction.amount);
+                } else if (newStatus === 'declined' || newStatus === 'pending') {
+                  destAcc.balance -= Math.abs(transaction.amount);
+                }
+              }
+            }
+
+            // 3. P2P send recipient credit rule
+            if (transaction.id.startsWith('tx-p2p-send-') && transaction.description.includes('@')) {
+              const recipientPart = transaction.description.split('@')[1]?.trim();
+              if (recipientPart) {
+                const receiverIdx = allUsers.findIndex(u => u.username.toLowerCase() === recipientPart.toLowerCase());
+                if (receiverIdx !== -1) {
+                  const receiverAcc = allUsers[receiverIdx].accounts.find(a => a.type === 'checking');
+                  if (receiverAcc) {
+                    if (newStatus === 'successful') {
+                      receiverAcc.balance += Math.abs(transaction.amount);
+                      // Add a transaction record for receiver too
+                      const recvTx: Transaction = {
+                        id: `tx-p2p-recv-${Date.now()}`,
+                        description: `P2P recv from @${allUsers[userIdx].username}`,
+                        amount: Math.abs(transaction.amount),
+                        date: transaction.date,
+                        timestamp: Date.now(),
+                        category: 'transfer',
+                        status: 'successful'
+                      };
+                      allUsers[receiverIdx].transactions = [recvTx, ...allUsers[receiverIdx].transactions];
+                    } else if (newStatus === 'declined' || newStatus === 'pending') {
+                      receiverAcc.balance -= Math.abs(transaction.amount);
+                    }
+                  }
+                }
+              }
+            }
+
+            // 4. Savings Vault goals funding rule
+            if (transaction.id.startsWith('tx-vault-') && transaction.description.includes('Funded Vault:')) {
+              const vaultName = transaction.description.replace('Funded Vault:', '').trim();
+              if (allUsers[userIdx].savingsGoals) {
+                const goal = allUsers[userIdx].savingsGoals.find(g => g.name === vaultName);
+                if (goal) {
+                  if (newStatus === 'successful') {
+                    goal.currentAmount += Math.abs(transaction.amount);
+                  } else if (newStatus === 'declined' || newStatus === 'pending') {
+                    goal.currentAmount -= Math.abs(transaction.amount);
+                  }
+                }
+              }
             }
           }
           
@@ -831,12 +995,26 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
                           <button
                             onClick={() => {
                               setSelectedEditUser(u);
-                              setCheckingInputBalance(checking.toString());
-                              setSavingsInputBalance(savings.toString());
+                              setCheckingInputBalance((u.accounts.find(a => a.type === 'checking')?.balance || 0).toString());
+                              setSavingsInputBalance((u.accounts.find(a => a.type === 'savings')?.balance || 0).toString());
+                              setCreditInputBalance((u.accounts.find(a => a.type === 'credit')?.balance || 0).toString());
+                              setInvestInputBalance((u.accounts.find(a => a.type === 'investment')?.balance || 0).toString());
+                              
+                              const names = u.name.split(' ');
+                              setEditUserFirstName(u.legalFirstName || names[0] || '');
+                              setEditUserMiddleName(u.middleName || '');
+                              setEditUserLastName(u.legalLastName || names.slice(1).join(' ') || '');
+                              setEditUserEmail(u.email || '');
+                              setEditUserPhone(u.phoneNumber || '');
+                              setEditUserCountry(u.country || '');
+                              setEditUserRole(u.role || 'user');
+                              setEditUserPin(u.transactionPin || '');
+                              setEditUserPassword(u.password || '');
+                              setEditUserIban(u.iban || '');
                             }}
-                            className="text-[10px] bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition font-mono font-bold px-2 py-1 rounded-lg text-indigo-700 cursor-pointer shadow-xs"
+                            className="text-[10px] bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 transition font-mono font-bold px-2.5 py-1 rounded-lg text-indigo-700 cursor-pointer shadow-xs"
                           >
-                            Modify Balance
+                            Manage Profile & Accounts
                           </button>
                           <button
                             onClick={() => handleDeleteUser(u.id)}
@@ -856,52 +1034,245 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
         {/* TAB 1 EXTENSION: ACTIVE ADJUSTMENT PANEL OVERLAY */}
         {activeTab === 'users' && selectedEditUser && (
-          <form onSubmit={handleModifyBalances} className="space-y-5 border border-slate-200 p-5 rounded-2xl bg-white shadow-lg animate-fade-in text-slate-800">
+          <form onSubmit={handleModifyBalances} className="space-y-6 border border-slate-200 p-6 rounded-2xl bg-white shadow-xl animate-fade-in text-slate-800">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900 uppercase flex items-center gap-1.5">
-                Adjust Ledger: {selectedEditUser.name}
-              </h3>
+              <div className="flex items-center gap-3">
+                <img 
+                  src={selectedEditUser.avatarUrl} 
+                  alt={selectedEditUser.name} 
+                  className="w-10 h-10 rounded-full object-cover border border-slate-200"
+                  referrerPolicy="no-referrer"
+                />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+                    Manage Registry Workspace: {selectedEditUser.name}
+                  </h3>
+                  <p className="text-[10px] text-indigo-600 font-mono font-medium">@{selectedEditUser.username || 'n/a'}</p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setSelectedEditUser(null)}
-                className="text-xs text-slate-550 hover:text-slate-700 font-semibold cursor-pointer"
+                className="text-xs text-slate-500 hover:text-slate-800 font-bold underline cursor-pointer"
               >
-                Cancel
+                Cancel / Return
               </button>
             </div>
 
-            <div className="space-y-3.5">
-              <div className="space-y-1.5">
-                <label className="text-xs text-slate-500 font-mono font-bold uppercase tracking-wider">Override Checking Balance ($)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={checkingInputBalance}
-                  onChange={(e) => setCheckingInputBalance(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 py-3 px-4 text-xs font-bold font-mono text-indigo-700 rounded-lg outline-none focus:border-indigo-500"
-                />
+            {/* General Layout Split: Left columns details, right column accounts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left Column: Personal Registry Details & Account Settings */}
+              <div className="space-y-4">
+                <div className="bg-slate-50/55 p-4 rounded-xl border border-slate-150 space-y-3">
+                  <span className="text-[10px] font-bold text-indigo-600 block uppercase tracking-wider font-mono">1. User Registry Information</span>
+                  
+                  <div className="grid grid-cols-3 gap-2">
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Legal First Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={editUserFirstName}
+                        onChange={(e) => setEditUserFirstName(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-semibold rounded-lg text-slate-800 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Middle Name</label>
+                      <input
+                        type="text"
+                        value={editUserMiddleName}
+                        onChange={(e) => setEditUserMiddleName(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-semibold rounded-lg text-slate-800 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Legal Last Name</label>
+                      <input
+                        type="text"
+                        required
+                        value={editUserLastName}
+                        onChange={(e) => setEditUserLastName(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-semibold rounded-lg text-slate-800 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Registry Email</label>
+                      <input
+                        type="email"
+                        required
+                        value={editUserEmail}
+                        onChange={(e) => setEditUserEmail(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-semibold rounded-lg text-slate-800 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Phone Identifier</label>
+                      <input
+                        type="text"
+                        value={editUserPhone}
+                        onChange={(e) => setEditUserPhone(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-semibold rounded-lg text-slate-800 outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Residing Country</label>
+                      <input
+                        type="text"
+                        value={editUserCountry}
+                        onChange={(e) => setEditUserCountry(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-semibold rounded-lg text-slate-800 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">IBAN Ledger ID</label>
+                      <input
+                        type="text"
+                        value={editUserIban}
+                        onChange={(e) => setEditUserIban(e.target.value)}
+                        placeholder="e.g. DE89 3704 ..."
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-semibold rounded-lg text-slate-800 outline-none font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50/55 p-4 rounded-xl border border-slate-150 space-y-3">
+                  <span className="text-[10px] font-bold text-indigo-600 block uppercase tracking-wider font-mono font-sans flex items-center justify-between">2. Access Credentials & Permissions</span>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Role Status</label>
+                      <select
+                        value={editUserRole}
+                        onChange={(e) => setEditUserRole(e.target.value as 'user' | 'admin')}
+                        className="w-full bg-white border border-slate-200 py-2 px-2 text-xs font-semibold rounded-lg text-slate-800 outline-none shadow-2xs"
+                      >
+                        <option value="user">User</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Transaction PIN</label>
+                      <input
+                        type="text"
+                        maxLength={4}
+                        placeholder="e.g. 1928"
+                        value={editUserPin}
+                        onChange={(e) => setEditUserPin(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-bold rounded-lg text-indigo-700 outline-none font-mono tracking-widest text-center"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-500">Reset Password</label>
+                      <input
+                        type="text"
+                        placeholder="New Password"
+                        value={editUserPassword}
+                        onChange={(e) => setEditUserPassword(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2 px-2.5 text-xs font-semibold rounded-lg text-slate-800 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-xs text-slate-500 font-mono font-bold uppercase tracking-wider">Override Savings Balance ($)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  required
-                  value={savingsInputBalance}
-                  onChange={(e) => setSavingsInputBalance(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 py-3 px-4 text-xs font-bold font-mono text-indigo-700 rounded-lg outline-none focus:border-indigo-500"
-                />
+              {/* Right Column: Multi-Account Ledger Balances Control */}
+              <div className="bg-slate-50/55 p-4 rounded-xl border border-slate-150 space-y-3 flex flex-col justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-indigo-600 block uppercase tracking-wider font-mono">3. Banking Reserves Control Panel</span>
+                  <p className="text-[9px] text-slate-500 mt-0.5 mb-3 leading-normal font-sans">Directly override specific accounts' balances in this user's bank ledger portfolio.</p>
+
+                  <div className="grid grid-cols-2 gap-3 pb-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-520 font-mono">Primary Checking Reserve ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={checkingInputBalance}
+                        onChange={(e) => setCheckingInputBalance(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2.5 px-3 text-xs font-extrabold font-mono text-slate-850 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-520 font-mono">Vault Savings Reserve ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={savingsInputBalance}
+                        onChange={(e) => setSavingsInputBalance(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2.5 px-3 text-xs font-extrabold font-mono text-slate-850 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-520 font-mono">Pro-Limit Credit Balance ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={creditInputBalance}
+                        onChange={(e) => setCreditInputBalance(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2.5 px-3 text-xs font-extrabold font-mono text-slate-850 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-slate-520 font-mono">Wealth Arbitrage Reserve ($)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        required
+                        value={investInputBalance}
+                        onChange={(e) => setInvestInputBalance(e.target.value)}
+                        className="w-full bg-white border border-slate-200 py-2.5 px-3 text-xs font-extrabold font-mono text-slate-850 rounded-lg outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-200/60 flex gap-2 font-sans">
+                  <button
+                    type="submit"
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition duration-150 shadow-xs cursor-pointer text-center"
+                  >
+                    Apply All Administrative Changes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedEditUser.cards && selectedEditUser.cards.length > 0) {
+                        const allUsers = loadUsersData();
+                        const idx = allUsers.findIndex(u => u.id === selectedEditUser.id);
+                        if (idx !== -1 && allUsers[idx].cards && allUsers[idx].cards[0]) {
+                          const wasFrozen = allUsers[idx].cards[0].isFrozen;
+                          allUsers[idx].cards[0].isFrozen = !wasFrozen;
+                          saveUsersData(allUsers);
+                          refreshLocalState();
+                          alert(`Credit Card status for ${selectedEditUser.name} set to: ${!wasFrozen ? 'FROZEN' : 'ACTIVE'}`);
+                        }
+                      } else {
+                        alert("No active credit card found for this user.");
+                      }
+                    }}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 px-3.5 rounded-xl text-xs transition cursor-pointer border border-slate-200/60"
+                    title="Toggle freeze/unfreeze first credit card"
+                  >
+                    Toggle Card Lock
+                  </button>
+                </div>
               </div>
             </div>
-
-            <button
-              type="submit"
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-xl text-xs transition duration-150 shadow-sm cursor-pointer"
-            >
-              Confirm State Override
-            </button>
           </form>
         )}
 

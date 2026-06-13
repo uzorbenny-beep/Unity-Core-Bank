@@ -201,9 +201,6 @@ export default function FinancialChart({ totalBalance, registrationTimestamp }: 
           <span className="text-xs text-slate-400 uppercase tracking-wider font-bold">Total Balance</span>
           <div className="text-3xl font-extrabold text-white tracking-tight mt-1 flex items-baseline">
             {activePoint.rawStr}
-            <span className="text-xs text-blue-400 font-mono ml-2 font-normal">
-              {activePoint.labelDetail || activePoint.label}
-            </span>
           </div>
           <div className="flex items-center gap-1.5 mt-1 text-emerald-450 text-emerald-400 text-xs font-bold">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -216,8 +213,6 @@ export default function FinancialChart({ totalBalance, registrationTimestamp }: 
         {/* Selected Data Pill */}
         {activePoint && (
           <div className="bg-slate-900 border border-slate-800 text-xs px-2.5 py-1 text-slate-300 rounded-lg pointer-events-none">
-            <span className="font-mono font-bold text-blue-400">{activePoint.labelDetail || activePoint.label}</span>
-            <span className="mx-1.5 text-slate-600">•</span>
             <span className="font-bold text-white">{activePoint.rawStr}</span>
           </div>
         )}

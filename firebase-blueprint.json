@@ -53,6 +53,14 @@
         "supportTickets": {
           "type": "array",
           "description": "Customer service support records"
+        },
+        "notifications": {
+          "type": "array",
+          "description": "User notifications list"
+        },
+        "registrationTimestamp": {
+          "type": "integer",
+          "description": "User registration millisecond epoch timestamp"
         }
       },
       "required": ["id", "username", "email", "name", "role", "accounts", "cards"]

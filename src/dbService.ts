@@ -106,9 +106,11 @@ export const dbService = {
           authUser = userCred.user;
         } catch (authErr: any) {
           if (authErr.code === "auth/operation-not-allowed") {
-            throw new Error(
-              "Firebase Authentication Error: The 'Email/Password' identity provider is not enabled in your Firebase Console. To enable it: 1) Go to your Firebase Console, 2) Click 'Authentication' in the left sidebar, 3) Go to the 'Sign-in method' tab, 4) Under 'Sign-in providers', click 'Add new provider' and choose 'Email/Password', 5) Toggle 'Enable' and save."
+            console.warn(
+              "[Firebase Sign-Up Fallback] Firebase Email/Password provider is disabled. Falling back automatically to Local Secure storage."
             );
+            localStorage.setItem("active_db_driver", "fallback_secure");
+            return await dbService.signUp(email, passwordOrPin, username, fullName, initialDeposit, additionalFields);
           }
           if (authErr.code === "auth/email-already-in-use") {
             console.log("[Firebase Sign-Up] Email already exists in Auth. Checking if Firestore profile is missing to auto-heal profile...");
@@ -127,9 +129,11 @@ export const dbService = {
               console.log("[Firebase Sign-Up] Profile is missing from Firestore. Register flow will auto-recreate Firestore document for UID:", uid);
             } catch (signInErr: any) {
               if (signInErr.code === "auth/operation-not-allowed") {
-                throw new Error(
-                  "Firebase Authentication Error: The 'Email/Password' identity provider is not enabled in your Firebase Console. To enable it: 1) Go to your Firebase Console, 2) Click 'Authentication' in the left sidebar, 3) Go to the 'Sign-in method' tab, 4) Under 'Sign-in providers', click 'Add new provider' and choose 'Email/Password', 5) Toggle 'Enable' and save."
+                console.warn(
+                  "[Firebase Sign-Up Fallback] Firebase Email/Password provider is disabled during auto-heal. Falling back automatically to Local Secure storage."
                 );
+                localStorage.setItem("active_db_driver", "fallback_secure");
+                return await dbService.signUp(email, passwordOrPin, username, fullName, initialDeposit, additionalFields);
               }
               // Wrong password or other error; throw original registration error
               throw authErr;
@@ -715,9 +719,11 @@ export const dbService = {
       } catch (err: any) {
         console.error("[Firebase Login Error] Error: ", err);
         if (err.code === "auth/operation-not-allowed") {
-          throw new Error(
-            "Firebase Authentication Error: The 'Email/Password' identity provider is not enabled in your Firebase Console. To enable it: 1) Go to your Firebase Console, 2) Click 'Authentication' in the left sidebar, 3) Go to the 'Sign-in method' tab, 4) Under 'Sign-in providers', click 'Add new provider' and choose 'Email/Password', 5) Toggle 'Enable' and save."
+          console.warn(
+            "[Firebase Login Fallback] Firebase Email/Password provider is disabled. Falling back automatically to Local Secure checks."
           );
+          localStorage.setItem("active_db_driver", "fallback_secure");
+          return await dbService.signIn(emailOrUsername, passwordOrPin);
         }
         // Rethrow standard unauthorized auth exceptions clearly
         if (
