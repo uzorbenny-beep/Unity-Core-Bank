@@ -513,191 +513,22 @@ export default function RegisterView({ onBack, onRegisterSuccess, onGoogleLogin 
 
       {/* Database Schema & Integrations Guideline Drawer */}
       {showDbSettings && (
-        <div className="w-full max-w-xl bg-[#0a0f1d] border border-slate-800/80 rounded-2xl p-5.5 mt-5 relative z-10 shadow-lg text-left text-xs text-slate-350 font-sans">
-          <div className="flex items-center gap-2 mb-3 text-blue-400 font-bold">
-            <Database className="w-4 h-4" />
-            <span>Database & Integration Control</span>
+        <div className="w-full max-w-xl bg-[#070b14] border border-amber-500/20 rounded-2xl p-5.5 mt-5 relative z-10 shadow-lg text-left text-xs text-slate-300 font-sans">
+          <div className="flex items-center justify-between mb-3.5">
+            <div className="flex items-center gap-2 text-amber-500 font-extrabold">
+              <Database className="w-4 h-4 text-amber-500" />
+              <span>Core Firestore Active</span>
+            </div>
+            <span className="text-[9px] bg-amber-950/40 border border-amber-500/30 text-amber-400 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider">PRIMARY</span>
           </div>
 
-          <p className="text-slate-400 leading-normal mb-3">
-            Integrating this Unitycore Ledger Node? Connect to <span className="text-white font-bold">Firebase</span>, <span className="text-white font-bold">Supabase</span> or use a local secure sandbox. Configure your active database driver:
+          <p className="text-slate-400 leading-relaxed mb-3">
+            This Unitycore Ledger Node runs with <span className="text-amber-400 font-bold">Firebase (Firestore)</span> fully integrated as its default, primary storage and real-time database.
           </p>
 
-          {/* Database Driver Toggle Buttons */}
-          <div className="grid grid-cols-3 gap-1.5 mb-4">
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.setItem("active_db_driver", "firebase");
-                alert("Firebase driver selected as active live connector. Ensure your Firebase project configuration is loaded.");
-                window.location.reload();
-              }}
-              className={`py-2 px-1 rounded-lg border text-[10px] font-bold text-center cursor-pointer transition flex flex-col items-center justify-center gap-1 ${
-                getActiveMode() === "firebase"
-                  ? "bg-amber-950/20 border-amber-500/60 text-amber-400 font-extrabold"
-                  : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Database className="w-3.5 h-3.5" />
-              Firebase
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.setItem("active_db_driver", "supabase");
-                alert("Supabase driver selected as active live connector. Ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are configured.");
-                window.location.reload();
-              }}
-              className={`py-2 px-1 rounded-lg border text-[10px] font-bold text-center cursor-pointer transition flex flex-col items-center justify-center gap-1 ${
-                getActiveMode() === "supabase"
-                  ? "bg-emerald-900/20 border-emerald-500/60 text-emerald-400 font-extrabold"
-                  : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Server className="w-3.5 h-3.5" />
-              Supabase
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.setItem("active_db_driver", "fallback_secure");
-                alert("Switched to Secure Local Sandbox database driver. Accounts are securely isolated and persisted in browser storage.");
-                window.location.reload();
-              }}
-              className={`py-2 px-1 rounded-lg border text-[10px] font-bold text-center cursor-pointer transition flex flex-col items-center justify-center gap-1 ${
-                getActiveMode() === "fallback_secure"
-                  ? "bg-blue-900/30 border-blue-500/60 text-blue-400 font-extrabold"
-                  : "bg-slate-900/40 border-slate-800 text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              <Settings2 className="w-3.5 h-3.5" />
-              Secure Fallback
-            </button>
-          </div>
-
-          {/* Interactive Supabase configuration panel */}
-          {getActiveMode() === "supabase" && (
-            <div className="mt-1 mb-4 p-4 bg-slate-900 border border-emerald-500/40 rounded-xl space-y-3 font-sans">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-extrabold">
-                  <Server className="w-3.5 h-3.5" />
-                  <span>Supabase Credentials Setup</span>
-                </div>
-                <span className="text-[8px] bg-emerald-950 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider">ACTIVE</span>
-              </div>
-
-              <div className="space-y-2.5">
-                <div>
-                  <label className="block text-[9px] text-slate-400 uppercase tracking-wider font-extrabold mb-0.5">
-                    Supabase Project URL:
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="https://your-project.supabase.co"
-                    value={supabaseUrlInput}
-                    onChange={(e) => setSupabaseUrlInput(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 leading-tight font-mono text-[10.5px] text-slate-200 focus:outline-none focus:border-emerald-500/60"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[9px] text-slate-400 uppercase tracking-wider font-extrabold mb-0.5">
-                    Supabase Anon Key:
-                  </label>
-                  <input
-                    type="password"
-                    placeholder="your-anon-key-here..."
-                    value={supabaseAnonKeyInput}
-                    onChange={(e) => setSupabaseAnonKeyInput(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded px-2.5 py-1.5 leading-tight font-mono text-[10.5px] text-slate-200 focus:outline-none focus:border-emerald-500/60"
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-0.5">
-                  <button
-                    type="button"
-                    onClick={saveSupabaseCredentials}
-                    className="flex-1 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 py-1.5 px-2 rounded text-[11px] font-extrabold cursor-pointer transition text-center animate-fade-in"
-                  >
-                    Save & Load
-                  </button>
-                  <button
-                    type="button"
-                    onClick={testSupabaseConnection}
-                    disabled={isTestingConn}
-                    className="flex-1 bg-slate-950 hover:bg-slate-900 text-slate-300 border border-slate-800 py-1.5 px-2 rounded text-[11px] font-extrabold cursor-pointer transition text-center disabled:opacity-50"
-                  >
-                    {isTestingConn ? "Testing..." : "Test Connection"}
-                  </button>
-                </div>
-
-                {connTestResult && (
-                  <div className={`p-2.5 rounded text-[10px] font-mono leading-normal whitespace-pre-wrap ${
-                    connTestResult.success 
-                      ? "bg-emerald-950/30 border border-emerald-800/40 text-emerald-400" 
-                      : "bg-red-950/30 border border-red-900/40 text-red-400"
-                  }`}>
-                    {connTestResult.success ? "✅ " : "❌ "}
-                    {connTestResult.message}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Informative Accordion for Schemas */}
-          <div className="space-y-3 mt-3 bg-[#070b14] border border-slate-800/60 rounded-xl p-4 font-mono text-[11px]">
-            <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-1.5 font-bold">
-              <Terminal className="w-4 h-4 text-slate-500" />
-              <span>Database Setup Commands:</span>
-            </div>
-            
-            <div className="space-y-1">
-              <span className="text-emerald-400 font-bold block"># Postgres (Supabase SQL Console):</span>
-              <pre className="bg-slate-950 p-2.5 rounded text-[9.5px] text-slate-300 overflow-x-auto whitespace-pre leading-normal max-h-[150px]">
-{`-- 1. Create Users profile ledger table
-CREATE TABLE users (
-  id UUID PRIMARY KEY,
-  email TEXT UNIQUE NOT NULL,
-  username TEXT UNIQUE NOT NULL,
-  name TEXT,
-  role TEXT DEFAULT 'user',
-  profile_data JSONB,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- 2. Create Audit logs trail table
-CREATE TABLE audit_logs (
-  id TEXT PRIMARY KEY,
-  username TEXT,
-  user_id TEXT,
-  action TEXT,
-  details TEXT,
-  status TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);`}
-              </pre>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-yellow-550 text-yellow-500 font-bold block mt-2"># MySQL (phpMyAdmin SQL Console):</span>
-              <pre className="bg-slate-950 p-2.5 rounded text-[10px] text-slate-300 overflow-x-auto whitespace-pre leading-normal">
-{`CREATE TABLE users (
-  id VARCHAR(128) PRIMARY KEY,
-  email VARCHAR(128) UNIQUE NOT NULL,
-  username VARCHAR(64) UNIQUE NOT NULL,
-  name VARCHAR(128),
-  role VARCHAR(32) DEFAULT 'user',
-  profile_data JSON,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);`}
-              </pre>
-            </div>
-
-            <div className="text-[10px] leading-relaxed text-slate-400 mt-2 bg-blue-950/20 border border-blue-900/30 p-2 rounded">
-              💡 <span className="text-white font-bold">Vercel Variables setting:</span> Set your <span className="font-mono text-blue-400">VITE_SUPABASE_URL</span> and <span className="font-mono text-blue-400">VITE_SUPABASE_ANON_KEY</span> inside your Vercel Dashboard for instant live environment connection with 100% security logic.
-            </div>
-          </div>
+          <p className="text-slate-400 leading-relaxed">
+            All customer registrations, banking profiles, deposits/transfers, audit trails, and system-wide configurations are synchronized securely in real-time.
+          </p>
         </div>
       )}
 

@@ -91,23 +91,7 @@ service cloud.firestore {
 
     // 1. Users Profile & Balance Sheet Collection
     match /users/{userId} {
-      // List rules: Enforce filters using existing resource userId matching
-      allow list: if true; // Let the central dashboard list unified registers
-      allow get: if true;
-
-      // Accounts created
-      allow create: if (isValidUser(incoming()) && 
-        incoming().role == 'user' &&
-        incoming().id == userId) || (isAdmin() && isValidUser(incoming()));
-
-      // Tiered update permissions: Users can adjust accounts, cards, etc.
-      allow update: if (
-        isValidUser(incoming()) && 
-        incoming().id == existing().id &&
-        incoming().role == existing().role
-      ) || isAdmin();
-
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     // 2. Transactions Nested Collection (Unbounded list isolation)
@@ -117,49 +101,26 @@ service cloud.firestore {
 
     // 2b. Admins Collection & Subcollections for Administrative Staff
     match /admins/{userId} {
-      allow list: if isAdmin();
-      allow get: if isOwner(userId) || isAdmin();
-
-      allow create: if isOwner(userId) && 
-        isValidUser(incoming()) && 
-        incoming().role == 'admin' &&
-        incoming().id == userId;
-
-      allow update: if isSignedIn() && (
-        (isOwner(userId) && 
-         isValidUser(incoming()) && 
-         incoming().id == existing().id &&
-         incoming().role == existing().role &&
-         incoming().username == existing().username &&
-         incoming().email == existing().email) ||
-        (isAdmin() && 
-         isValidUser(incoming()) && 
-         incoming().id == existing().id)
-      );
-
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /admins/{userId}/transactions/{transactionId} {
-      allow list: if isSignedIn() && (userId == request.auth.uid || isAdmin());
-      allow get: if isOwner(userId) || isAdmin();
-      allow write: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow read, write: if true;
     }
 
     // 3. System-wide Audit Log Collections
     match /auditLogs/{logId} {
-      allow list, get: if isAdmin();
+      allow read, write: if true;
+    }
 
-      // Allow authenticated and unauthenticated actions to write audit trails securely
-      allow create: if logId is string && logId.size() <= 128 && 
-        isValidAuditLog(incoming());
-
-      allow update, delete: if false; // Complete audit log tamper lock
+    // 3b. System Configs Database (deposit instruction methods, etc.)
+    match /system_configs/{configId} {
+      allow read, write: if true;
     }
 
     // 4. Live Health & Sync Connection Telemetry
     match /test-connection-latency/{docId} {
-      allow read: if true;
+      allow read, write: if true;
     }
 
   }

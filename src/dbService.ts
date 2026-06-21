@@ -38,23 +38,8 @@ export const supabase = supabaseClient;
 export type DatabaseMode = "supabase" | "firebase" | "fallback_secure";
 
 export function getActiveMode(): DatabaseMode {
-  // If central firebase database is configured, we prioritize firebase to guarantee central synced registers.
-  if (activeConfig && activeConfig.apiKey) {
-    const manualDriver = localStorage.getItem("active_db_driver") as DatabaseMode | null;
-    if (manualDriver === "supabase" && supabase) {
-      return "supabase";
-    }
-    return "firebase";
-  }
-
-  const manualDriver = localStorage.getItem("active_db_driver") as DatabaseMode | null;
-  if (manualDriver && ["firebase", "supabase", "fallback_secure"].includes(manualDriver)) {
-    return manualDriver;
-  }
-  if (supabase) {
-    return "supabase";
-  }
-  return "fallback_secure";
+  // Firebase is configured as the absolute central default and main storage for everything.
+  return "firebase";
 }
 
 // Minimal password simple salt + hash simulation for local secure vault checking
@@ -930,6 +915,26 @@ export const dbService = {
     // Cache local audit trail
     fallbackAddAuditLog(username, userId, action, details, status);
 
+    if (mode === "firebase" && firebaseDb) {
+      try {
+        const { doc, setDoc } = await import("firebase/firestore");
+        const logId = `log-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const logRef = doc(firebaseDb, "auditLogs", logId);
+        await setDoc(logRef, {
+          id: logId,
+          timestamp: new Date().toISOString(),
+          userId,
+          username,
+          action,
+          details,
+          status,
+        });
+        console.log("[Firebase] Successfully logged audit event:", action);
+      } catch (err) {
+        console.error("[Firebase Audit Logging Fail]", err);
+      }
+    }
+
     if (mode === "supabase" && supabase) {
       try {
         await supabase.from("audit_logs").insert({
@@ -951,6 +956,33 @@ export const dbService = {
    */
   async getAuditLogs(): Promise<AuditLog[]> {
     const mode = getActiveMode();
+    if (mode === "firebase" && firebaseDb) {
+      try {
+        const { collection, getDocs, query, orderBy, limit } = await import("firebase/firestore");
+        const logsCol = collection(firebaseDb, "auditLogs");
+        const q = query(logsCol, orderBy("timestamp", "desc"), limit(105));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          const fetchedLogs: AuditLog[] = [];
+          snap.forEach((docSnap) => {
+            const data = docSnap.data();
+            fetchedLogs.push({
+              id: data.id || docSnap.id,
+              timestamp: data.timestamp || new Date().toISOString(),
+              userId: data.userId || "",
+              username: data.username || "anonymous",
+              action: data.action || "",
+              details: data.details || "",
+              status: data.status || "success",
+            });
+          });
+          return fetchedLogs;
+        }
+      } catch (err) {
+        console.error("[Firebase Audit Retrieval Fail] Falling back to Local Logs:", err);
+      }
+    }
+
     if (mode === "supabase" && supabase) {
       try {
         const { data, error } = await supabase
