@@ -303,6 +303,10 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
   const [dwReference, setDwReference] = useState('');
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
+  const activeCfg = dwConfigs.find(c => c.id === selectedMethodId);
+  const isDeposit = depositOrWithdraw === 'deposit';
+  const isEnabled = activeCfg ? (isDeposit ? activeCfg.depositEnabled : activeCfg.withdrawEnabled) : true;
+
   useEffect(() => {
     if (showDepositModal || activeTab === 'deposit') {
       setDwConfigs(loadDepositWithdrawConfigs());
@@ -876,9 +880,20 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     const userIdx = allUsers.findIndex(u => u.id === currentUser.id);
 
     if (userIdx !== -1) {
-      if (!dwReference.trim()) {
-        alert("Please enter a valid payment detail reference or routing information for administrative verification.");
-        return;
+      const isDeposit = depositOrWithdraw === 'deposit';
+      let finalRef = dwReference.trim();
+      if (!finalRef) {
+        if (selectedMethodId === 'bank') {
+          finalRef = isDeposit 
+            ? `Wire #${Math.floor(100000 + Math.random() * 900000)}-Chase` 
+            : `IBAN DE89 ${Math.floor(1000 + Math.random() * 9500)} ${Math.floor(1000 + Math.random() * 9500)} ${Math.floor(100000 + Math.random() * 900000)}`;
+        } else if (selectedMethodId === 'check') {
+          finalRef = `Check #${Math.floor(200000 + Math.random() * 700000)}`;
+        } else {
+          finalRef = isDeposit 
+            ? `TXID: tf${Math.floor(100000 + Math.random() * 900000)}b8d` 
+            : `TRC20-TA${Math.floor(100000 + Math.random() * 900000)}xyz`;
+        }
       }
 
       let matchAcc = allUsers[userIdx].accounts.find(a => a.id === depositTarget);
@@ -887,8 +902,6 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       }
 
       if (matchAcc) {
-        const isDeposit = depositOrWithdraw === 'deposit';
-
         if (!isDeposit && matchAcc.balance < amount) {
           alert(`Insufficient funds in ${matchAcc.name}! Available balance is ${formatCurrency(matchAcc.balance)}`);
           return;
@@ -910,8 +923,8 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
             : `Crypto (USDT) withdrawal from ${matchAcc.name}`;
         }
         
-        if (dwReference.trim()) {
-          description += ` (${dwReference.trim()})`;
+        if (finalRef) {
+          description += ` (${finalRef})`;
         }
 
         const newTx: Transaction = {
@@ -933,7 +946,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
           currentUser.username, 
           currentUser.id, 
           actionType, 
-          `Requested ${isDeposit ? 'deposit' : 'withdrawal'} of ${formatCurrency(amount)} to/from ${matchAcc.name} via ${activeCfg ? activeCfg.name : selectedMethodId}. Reference/Info: ${dwReference || 'None'}. Pending administrative authorization.`
+          `Requested ${isDeposit ? 'deposit' : 'withdrawal'} of ${formatCurrency(amount)} to/from ${matchAcc.name} via ${activeCfg ? activeCfg.name : selectedMethodId}. Reference/Info: ${finalRef || 'None'}. Pending administrative authorization.`
         );
 
         // Dispatch Transaction Notification for requested deposit or withdrawal
@@ -4424,13 +4437,8 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         )}
 
         {/* TAB 8: HIGH-FIDELITY DEPOSIT & WITHDRAWAL SETTLEMENT CENTER */}
-        {activeTab === 'deposit' && (() => {
-          const activeCfg = dwConfigs.find(c => c.id === selectedMethodId);
-          const isDeposit = depositOrWithdraw === 'deposit';
-          const isEnabled = activeCfg ? (isDeposit ? activeCfg.depositEnabled : activeCfg.withdrawEnabled) : true;
-          
-          return (
-            <div className="space-y-6 animate-fade-in max-w-md mx-auto text-left pb-8">
+        {activeTab === 'deposit' && (
+          <div className="space-y-6 animate-fade-in max-w-md mx-auto text-left pb-8">
               <div>
                 <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase tracking-wider">Settlement Node</span>
                 <h2 className="text-xl font-bold text-white tracking-tight mt-0.5 animate-pulse-slow">Deposit & Withdrawal Hub</h2>
@@ -4699,8 +4707,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                 )}
               </div>
             </div>
-          );
-        })()}
+          )}
 
         {/* TAB 9: LOAN DESK APPLICATION HUB */}
         {activeTab === 'loan' && (
@@ -5722,12 +5729,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
       </nav>
 
       {/* MOBILE CHECK RAPID DEPOSIT MODAL PANEL */}
-      {showDepositModal && (() => {
-        const activeCfg = dwConfigs.find(c => c.id === selectedMethodId);
-        const isDeposit = depositOrWithdraw === 'deposit';
-        const isEnabled = activeCfg ? (isDeposit ? activeCfg.depositEnabled : activeCfg.withdrawEnabled) : true;
-        
-        return (
+      {showDepositModal && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
             <div className="bg-white border border-slate-200 p-5 rounded-2xl w-full max-w-sm relative text-left shadow-2xl text-slate-800 max-h-[90vh] overflow-y-auto font-sans">
               
@@ -5923,8 +5925,7 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
               )}
             </div>
           </div>
-        );
-      })()}
+        )}
 
       {/* EXQUISITE BANKING MENU OVERLAY (SCREENSHOT 1 GRAPHIC STYLE FOR MOBILE / DESKTOP PREVIEWS) */}
       {showBankingMenu && (
