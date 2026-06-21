@@ -271,7 +271,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
       if (fetchedUsers.length > 0) {
         // Save and render central Firestore data as 1:1 absolute state
-        saveUsersData(fetchedUsers);
+        saveUsersData(fetchedUsers, undefined, true);
         setUsers(fetchedUsers);
         setSyncStatus('Live cloud database in sync!');
       } else {
@@ -353,7 +353,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
           if (fetchedUsers.length > 0) {
             // Firestore is the absolute central source of truth. Save and render exact active cloud collection state.
-            saveUsersData(fetchedUsers);
+            saveUsersData(fetchedUsers, undefined, true);
             setUsers(fetchedUsers);
             setSyncStatus('Live cloud database in sync!');
           }
@@ -435,7 +435,13 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
     setUsers(loadUsersData());
     setAuditLogs(loadAuditLogs());
     onRefreshData();
-    syncUsersFromFirestore();
+    import('../../dbService').then(({ getActiveMode }) => {
+      if (getActiveMode() !== 'firebase') {
+        syncUsersFromFirestore();
+      }
+    }).catch(() => {
+      syncUsersFromFirestore();
+    });
   };
 
   // Modify Balance & Account Parameters Executions
@@ -525,7 +531,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
         allUsers[targetIdx].password = editUserPassword.trim();
       }
 
-      saveUsersData(allUsers);
+      saveUsersData(allUsers, selectedEditUser.id);
 
       // Sync update back to Firestore if in Firebase mode
       try {
@@ -573,7 +579,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
       isDanger: true,
       onConfirm: async () => {
         const updatedUsers = allUsers.filter(u => u.id !== userId);
-        saveUsersData(updatedUsers);
+        saveUsersData(updatedUsers, undefined, true);
 
         addAuditLog(
           currentAdmin.username,
@@ -779,7 +785,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
           }
           
           transaction.status = newStatus;
-          saveUsersData(allUsers);
+          saveUsersData(allUsers, userId);
 
           // If the status is approved and becomes successful, send confirmation alert email
           if (newStatus === 'successful') {
@@ -1450,7 +1456,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
                         if (idx !== -1 && allUsers[idx].cards && allUsers[idx].cards[0]) {
                           const wasFrozen = allUsers[idx].cards[0].isFrozen;
                           allUsers[idx].cards[0].isFrozen = !wasFrozen;
-                          saveUsersData(allUsers);
+                          saveUsersData(allUsers, selectedEditUser.id);
                           refreshLocalState();
                           alert(`Credit Card status for ${selectedEditUser.name} set to: ${!wasFrozen ? 'FROZEN' : 'ACTIVE'}`);
                         }

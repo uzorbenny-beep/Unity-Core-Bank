@@ -406,6 +406,27 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     return () => clearInterval(interval);
   }, []);
 
+  // Set accurate default account IDs dynamically based on the actual currentUser's accounts
+  useEffect(() => {
+    if (currentUser?.accounts && currentUser.accounts.length > 0) {
+      const checking = currentUser.accounts.find(a => a.type === 'checking') || currentUser.accounts[0];
+      const savings = currentUser.accounts.find(a => a.type === 'savings') || currentUser.accounts[1] || currentUser.accounts[0];
+      
+      if (depositTarget === 'acc-checking' && checking) {
+        setDepositTarget(checking.id);
+      }
+      if (transferFrom === 'acc-checking' && checking) {
+        setTransferFrom(checking.id);
+      }
+      if (transferTo === 'acc-savings' && savings) {
+        setTransferTo(savings.id);
+      }
+      if (wireTargetAccount === 'acc-checking' && checking) {
+        setWireTargetAccount(checking.id);
+      }
+    }
+  }, [currentUser, depositTarget, transferFrom, transferTo, wireTargetAccount]);
+
   // Helper to re-fetch and update parent layout state
   const triggerStateRefresh = () => {
     onRefreshUser(currentUser.username);
@@ -855,7 +876,16 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
     const userIdx = allUsers.findIndex(u => u.id === currentUser.id);
 
     if (userIdx !== -1) {
-      const matchAcc = allUsers[userIdx].accounts.find(a => a.id === depositTarget);
+      if (!dwReference.trim()) {
+        alert("Please enter a valid payment detail reference or routing information for administrative verification.");
+        return;
+      }
+
+      let matchAcc = allUsers[userIdx].accounts.find(a => a.id === depositTarget);
+      if (!matchAcc && allUsers[userIdx].accounts.length > 0) {
+        matchAcc = allUsers[userIdx].accounts.find(a => a.type === 'checking') || allUsers[userIdx].accounts[0];
+      }
+
       if (matchAcc) {
         const isDeposit = depositOrWithdraw === 'deposit';
 
@@ -942,8 +972,15 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
         return;
       }
 
-      const sourceAcc = allUsers[userIdx].accounts.find(a => a.id === transferFrom);
-      const destAcc = allUsers[userIdx].accounts.find(a => a.id === transferTo);
+      let sourceAcc = allUsers[userIdx].accounts.find(a => a.id === transferFrom);
+      let destAcc = allUsers[userIdx].accounts.find(a => a.id === transferTo);
+
+      if (!sourceAcc && allUsers[userIdx].accounts.length > 0) {
+        sourceAcc = allUsers[userIdx].accounts.find(a => a.type === 'checking') || allUsers[userIdx].accounts[0];
+      }
+      if (!destAcc && allUsers[userIdx].accounts.length > 0) {
+        destAcc = allUsers[userIdx].accounts.find(a => a.type === 'savings') || allUsers[userIdx].accounts[1] || allUsers[userIdx].accounts[0];
+      }
 
       if (!sourceAcc || !destAcc) return;
       if (sourceAcc.balance < amount) {
@@ -4547,7 +4584,6 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                       <span className="text-[10px] text-indigo-400 font-mono font-bold uppercase block">Transfer Funds Amount ($ USD)</span>
                       <input
                         type="number"
-                        required
                         min={1}
                         step="any"
                         placeholder="e.g. 1000.00"
@@ -4634,7 +4670,6 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                       </span>
                       <input
                         type="text"
-                        required
                         placeholder={
                           selectedMethodId === 'bank' 
                             ? (isDeposit ? 'e.g. Wire index #9305-Chase' : 'IBAN DE89 3704 0044...')
@@ -4701,7 +4736,10 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                   const allUsers = loadUsersData();
                   const userIdx = allUsers.findIndex(u => u.id === currentUser.id);
                   if (userIdx !== -1) {
-                    const matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
+                    let matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
+                    if (!matchAcc && allUsers[userIdx].accounts.length > 0) {
+                      matchAcc = allUsers[userIdx].accounts.find(a => a.type === 'checking') || allUsers[userIdx].accounts[0];
+                    }
                     if (matchAcc) {
                       // Do NOT adjust balance yet since it requires admin confirmation!
                       // matchAcc.balance += principal;
@@ -4926,7 +4964,10 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                           const allUsers = loadUsersData();
                           const userIdx = allUsers.findIndex(u => u.id === currentUser.id);
                           if (userIdx !== -1) {
-                            const matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
+                            let matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
+                            if (!matchAcc && allUsers[userIdx].accounts.length > 0) {
+                              matchAcc = allUsers[userIdx].accounts.find(a => a.type === 'checking') || allUsers[userIdx].accounts[0];
+                            }
                             if (matchAcc) {
                               const refundVal = parseFloat(irsExpectedAmount) || 3050;
                               // Do NOT adjust balance yet since it requires admin confirmation!
@@ -5121,7 +5162,10 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                     const allUsers = loadUsersData();
                     const userIdx = allUsers.findIndex(u => u.id === currentUser.id);
                     if (userIdx !== -1) {
-                      const matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
+                      let matchAcc = allUsers[userIdx].accounts.find(a => a.id === 'acc-checking');
+                      if (!matchAcc && allUsers[userIdx].accounts.length > 0) {
+                        matchAcc = allUsers[userIdx].accounts.find(a => a.type === 'checking') || allUsers[userIdx].accounts[0];
+                      }
                       if (matchAcc) {
                         // Do NOT adjust balance yet since it requires admin confirmation!
                         // matchAcc.balance += 52.50;
@@ -5824,7 +5868,6 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                     </span>
                     <input 
                       type="number"
-                      required
                       min={1}
                       step="any"
                       value={depositAmount}
@@ -5844,7 +5887,6 @@ export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch,
                     </span>
                     <input 
                       type="text"
-                      required
                       value={dwReference}
                       onChange={(e) => setDwReference(e.target.value)}
                       placeholder={

@@ -269,7 +269,7 @@ export default function App() {
                       const filteredList = currentList.filter(
                         (u) => u.id !== uid,
                       );
-                      saveUsersData([...filteredList, resolvedUser]);
+                      saveUsersData([...filteredList, resolvedUser], undefined, true);
                       setCurrentView("admin-dashboard");
                     },
                     (error) => {
@@ -361,7 +361,7 @@ export default function App() {
                       const filteredList = currentList.filter(
                         (u) => u.id !== uid,
                       );
-                      saveUsersData([...filteredList, resolvedUser]);
+                      saveUsersData([...filteredList, resolvedUser], undefined, true);
                       if (getActiveMode() === "firebase" && !firebaseUser.emailVerified && resolvedUser.role === "user") {
                         setCurrentView("verification-pending");
                       } else {

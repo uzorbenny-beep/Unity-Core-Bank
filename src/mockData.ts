@@ -440,31 +440,41 @@ export function loadUsersData(): BankUser[] {
   return JSON.parse(data);
 }
 
-export function saveUsersData(users: BankUser[]) {
+export function saveUsersData(users: BankUser[], onlySyncUserId?: string, skipFirestoreSync = false) {
   localStorage.setItem('unitycore_users', JSON.stringify(users));
+
+  if (skipFirestoreSync) return;
 
   // Async sync back to Firestore for persistence
   import('./firebase').then(({ db, auth, handleFirestoreError, OperationType }) => {
     import('firebase/firestore').then(({ doc, setDoc }) => {
       const currentUid = auth.currentUser?.uid;
+      if (!currentUid || !db) return;
+
       const currentUserInList = users.find(usr => usr.id === currentUid);
       const isCurrentUserAdmin = currentUserInList?.role === 'admin';
 
       users.forEach((u) => {
-        // Only sync the signed-in user's profile to avoid Firestore permission blocks, or sync any if admin
-        if (currentUid && (currentUid === u.id || isCurrentUserAdmin)) {
+        // If onlySyncUserId is provided, we ONLY sync that specific user.
+        // Otherwise, only sync the logged-in user (admin maps to their own doc if they aren't purposely editing a target).
+        const shouldSync = onlySyncUserId 
+          ? u.id === onlySyncUserId && (currentUid === u.id || isCurrentUserAdmin)
+          : (currentUid === u.id || (isCurrentUserAdmin && u.id === currentUid));
+
+        if (shouldSync) {
           const collectionName = u.role === 'admin' ? 'admins' : 'users';
           const uDoc = doc(db, collectionName, u.id);
-          setDoc(uDoc, {
+          
+          const cleanUser = {
             id: u.id,
             username: u.username,
             email: u.email,
             name: u.name,
             role: u.role,
-            avatarUrl: u.avatarUrl,
-            unreadNotifications: u.unreadNotifications,
-            accounts: u.accounts,
-            cards: u.cards,
+            avatarUrl: u.avatarUrl || "",
+            unreadNotifications: u.unreadNotifications || 0,
+            accounts: u.accounts || [],
+            cards: u.cards || [],
             savingsGoals: u.savingsGoals || [],
             billers: u.billers || [],
             supportTickets: u.supportTickets || [],
@@ -478,12 +488,14 @@ export function saveUsersData(users: BankUser[]) {
             transactionPin: u.transactionPin || "",
             password: u.password || "",
             iban: u.iban || ""
-          }).then(() => {
+          };
+
+          setDoc(uDoc, cleanUser, { merge: true }).then(() => {
             // Synchronize transaction collection
             if (u.transactions) {
               u.transactions.forEach((tx) => {
                 const txDoc = doc(db, collectionName, u.id, 'transactions', tx.id);
-                setDoc(txDoc, tx).catch(err => {
+                setDoc(txDoc, tx, { merge: true }).catch(err => {
                   handleFirestoreError(err, OperationType.WRITE, `${collectionName}/${u.id}/transactions/${tx.id}`);
                 });
               });

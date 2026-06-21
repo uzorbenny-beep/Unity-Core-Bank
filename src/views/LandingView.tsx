@@ -27,17 +27,83 @@ export default function LandingView({ onNavigate, onQuickLogin, onGoogleLogin }:
       <div className="flex flex-col items-center justify-center flex-grow max-w-sm w-full text-center relative z-10 py-8">
         
         {/* Glowing Minimalist Premium Bank Emblem */}
-        <div className="relative mb-6 cursor-pointer group">
-          <div className="absolute -inset-3 bg-gradient-to-tr from-indigo-500 to-blue-500 rounded-full blur-xl opacity-40 group-hover:opacity-60 transition duration-500" />
+        <div className="relative mb-8 cursor-pointer group animate-fade-in animate-duration-1000">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 h-48 bg-indigo-500/20 rounded-full blur-2xl group-hover:bg-indigo-500/35 transition duration-500 pointer-events-none" />
           
-          <div className="relative w-20 h-20 rounded-2xl bg-slate-900/90 border border-indigo-500/30 flex items-center justify-center p-4 shadow-xl">
-            <svg className="w-12 h-12 text-indigo-400 group-hover:text-blue-400 transition-colors duration-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" strokeWidth="1.5" />
-              <path d="M12 8v8" strokeWidth="1.5" />
-              <path d="M9 11h6" strokeWidth="1.5" />
-              <path d="M9 14h6" strokeWidth="1.5" />
-            </svg>
-          </div>
+          <svg className="relative w-28 h-28 drop-shadow-[0_0_35px_rgba(99,102,241,0.55)] group-hover:scale-105 transition-transform duration-300" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="g-top-left" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#a78bfa" />
+                <stop offset="100%" stopColor="#6366f1" />
+              </linearGradient>
+              <linearGradient id="g-top-right" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#c084fc" />
+                <stop offset="100%" stopColor="#818cf8" />
+              </linearGradient>
+              <linearGradient id="g-vibrant-1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#818cf8" />
+                <stop offset="100%" stopColor="#4f46e5" />
+              </linearGradient>
+              <linearGradient id="g-vibrant-2" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#c084fc" />
+                <stop offset="100%" stopColor="#7e22ce" />
+              </linearGradient>
+              <linearGradient id="g-dark-1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#4c1d95" />
+                <stop offset="100%" stopColor="#1e1b4b" />
+              </linearGradient>
+              <linearGradient id="g-dark-2" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#2e1065" />
+                <stop offset="100%" stopColor="#172554" />
+              </linearGradient>
+              <linearGradient id="g-light-accent" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#e9d5ff" />
+                <stop offset="100%" stopColor="#a78bfa" />
+              </linearGradient>
+            </defs>
+
+            {/* LEFT LEG */}
+            {/* Top cap */}
+            <polygon points="25,15 43,15 34,28" fill="url(#g-light-accent)" />
+            {/* Outer facet top */}
+            <polygon points="25,15 34,28 25,48" fill="url(#g-vibrant-1)" />
+            {/* Inner facet top */}
+            <polygon points="43,15 34,28 43,48" fill="url(#g-dark-1)" />
+            {/* Central diamond */}
+            <polygon points="34,28 43,48 34,60 25,48" fill="url(#g-vibrant-2)" />
+            {/* Bottom outer slant */}
+            <polygon points="25,48 25,65 34,60" fill="url(#g-dark-2)" />
+            {/* Bottom inner slant */}
+            <polygon points="43,48 43,55 34,60" fill="url(#g-vibrant-1)" />
+
+            {/* RIGHT LEG */}
+            {/* Top cap */}
+            <polygon points="75,15 57,15 66,28" fill="url(#g-top-right)" />
+            {/* Outer facet top */}
+            <polygon points="75,15 66,28 75,48" fill="url(#g-vibrant-2)" />
+            {/* Inner facet top */}
+            <polygon points="57,15 66,28 57,48" fill="url(#g-dark-2)" />
+            {/* Central diamond */}
+            <polygon points="66,28 57,48 66,60 75,48" fill="url(#g-vibrant-1)" />
+            {/* Bottom outer slant */}
+            <polygon points="75,48 75,65 66,60" fill="url(#g-dark-1)" />
+            {/* Bottom inner slant */}
+            <polygon points="57,48 57,55 66,60" fill="url(#g-vibrant-2)" />
+
+            {/* BOTTOM JUNCTION (V-BASE) */}
+            {/* Left-outer bottom triangle */}
+            <polygon points="25,65 34,60 50,90" fill="url(#g-vibrant-1)" />
+            {/* Right-outer bottom triangle */}
+            <polygon points="75,65 66,60 50,90" fill="url(#g-vibrant-2)" />
+            {/* Left-inner bottom triangle */}
+            <polygon points="43,55 34,60 50,65" fill="url(#g-dark-1)" />
+            {/* Right-inner bottom triangle */}
+            <polygon points="57,55 66,60 50,65" fill="url(#g-dark-2)" />
+            {/* Base left central facet */}
+            <polygon points="34,60 50,90 50,65" fill="url(#g-vibrant-2)" />
+            {/* Base right central facet */}
+            <polygon points="66,60 50,90 50,65" fill="url(#g-vibrant-1)" />
+          </svg>
         </div>
 
         {/* Brand Display Typography */}
