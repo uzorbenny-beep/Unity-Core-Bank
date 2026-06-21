@@ -38,13 +38,18 @@ export const supabase = supabaseClient;
 export type DatabaseMode = "supabase" | "firebase" | "fallback_secure";
 
 export function getActiveMode(): DatabaseMode {
+  // If central firebase database is configured, we prioritize firebase to guarantee central synced registers.
+  if (activeConfig && activeConfig.apiKey) {
+    const manualDriver = localStorage.getItem("active_db_driver") as DatabaseMode | null;
+    if (manualDriver === "supabase" && supabase) {
+      return "supabase";
+    }
+    return "firebase";
+  }
+
   const manualDriver = localStorage.getItem("active_db_driver") as DatabaseMode | null;
   if (manualDriver && ["firebase", "supabase", "fallback_secure"].includes(manualDriver)) {
     return manualDriver;
-  }
-  // Default to firebase if configured, otherwise checked before any other driver
-  if (activeConfig && activeConfig.apiKey) {
-    return "firebase";
   }
   if (supabase) {
     return "supabase";
@@ -76,26 +81,60 @@ export const dbService = {
     username: string,
     fullName: string,
     initialDeposit: number,
-    additionalFields?: any
+    additionalFields?: any,
+    forceLocalFallback = false
   ): Promise<BankUser> {
     const cleanUsername = username.toLowerCase().trim();
     const cleanEmail = email.toLowerCase().trim();
-    const mode = getActiveMode();
-
-    // 1. Check local username uniqueness first to maintain absolute system state integrity
+    const mode = forceLocalFallback ? "fallback_secure" : getActiveMode();
     const localUsers = loadUsersData();
-    const localExist = localUsers.find(
-      (u) => u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanEmail
-    );
-    if (localExist) {
-      throw new Error("Specified username or email address is already registered.");
+
+    if (mode !== "firebase") {
+      // 1. Check local username uniqueness first to maintain absolute system state integrity
+      const localExist = localUsers.find(
+        (u) => u.username.toLowerCase() === cleanUsername || u.email.toLowerCase() === cleanEmail
+      );
+      if (localExist) {
+        throw new Error("Specified username or email address is already registered.");
+      }
     }
 
     if (mode === "firebase") {
       try {
         console.log("[Firebase] Executing sign-up flow...");
         const { createUserWithEmailAndPassword, sendEmailVerification, signInWithEmailAndPassword } = await import("firebase/auth");
-        const { doc, setDoc, getDoc } = await import("firebase/firestore");
+        const { doc, setDoc, getDoc, collection, query, where, getDocs } = await import("firebase/firestore");
+
+        // Global Firestore uniqueness checks
+        console.log("[Firebase] Checking uniqueness of username and email across global cloud collections...");
+        const usersCol = collection(firebaseDb, "users");
+        
+        const qUsername = query(usersCol, where("username", "==", cleanUsername));
+        const usernameSnap = await getDocs(qUsername);
+        if (!usernameSnap.empty) {
+          throw new Error("Specified username is already taken.");
+        }
+
+        const qEmail = query(usersCol, where("email", "==", cleanEmail));
+        const emailSnap = await getDocs(qEmail);
+        if (!emailSnap.empty) {
+          throw new Error("Specified email address is already registered.");
+        }
+
+        // Check admins collection too for complete system integrity
+        const adminsCol = collection(firebaseDb, "admins");
+        
+        const qAdminUsername = query(adminsCol, where("username", "==", cleanUsername));
+        const adminUsernameSnap = await getDocs(qAdminUsername);
+        if (!adminUsernameSnap.empty) {
+          throw new Error("Specified username is already taken by an administrator.");
+        }
+
+        const qAdminEmail = query(adminsCol, where("email", "==", cleanEmail));
+        const adminEmailSnap = await getDocs(qAdminEmail);
+        if (!adminEmailSnap.empty) {
+          throw new Error("Specified email address is already registered as an administrator.");
+        }
 
         // 1. Create Firebase Auth user or recover if profile was purged
         let uid: string;
@@ -109,8 +148,7 @@ export const dbService = {
             console.warn(
               "[Firebase Sign-Up Fallback] Firebase Email/Password provider is disabled. Falling back automatically to Local Secure storage."
             );
-            localStorage.setItem("active_db_driver", "fallback_secure");
-            return await dbService.signUp(email, passwordOrPin, username, fullName, initialDeposit, additionalFields);
+            return await dbService.signUp(email, passwordOrPin, username, fullName, initialDeposit, additionalFields, true);
           }
           if (authErr.code === "auth/email-already-in-use") {
             console.log("[Firebase Sign-Up] Email already exists in Auth. Checking if Firestore profile is missing to auto-heal profile...");
@@ -132,8 +170,7 @@ export const dbService = {
                 console.warn(
                   "[Firebase Sign-Up Fallback] Firebase Email/Password provider is disabled during auto-heal. Falling back automatically to Local Secure storage."
                 );
-                localStorage.setItem("active_db_driver", "fallback_secure");
-                return await dbService.signUp(email, passwordOrPin, username, fullName, initialDeposit, additionalFields);
+                return await dbService.signUp(email, passwordOrPin, username, fullName, initialDeposit, additionalFields, true);
               }
               // Wrong password or other error; throw original registration error
               throw authErr;
@@ -519,6 +556,29 @@ export const dbService = {
     const updatedUserList = [...localUsers, offlineUser];
     saveUsersData(updatedUserList);
 
+    // Sync fallback register to Central Firebase Firestore if possible
+    try {
+      if (firebaseDb) {
+        const { doc, setDoc } = await import("firebase/firestore");
+        const userRef = doc(firebaseDb, "users", fallbackId);
+        
+        // Remove undefined values
+        const cleanUser = JSON.parse(JSON.stringify(offlineUser));
+        await setDoc(userRef, cleanUser);
+        
+        // Write initial transactions
+        if (offlineUser.transactions) {
+          for (const tx of offlineUser.transactions) {
+            const txDoc = doc(firebaseDb, "users", fallbackId, "transactions", tx.id);
+            await setDoc(txDoc, tx);
+          }
+        }
+        console.log("[Firebase Fallback Sync] Successfully backup registered offline user to central Firestore:", fallbackId);
+      }
+    } catch (fsErr) {
+      console.warn("[Firebase Fallback Sync Warning] Firestore backup skipped or blocked:", fsErr);
+    }
+
     // Save and publish Audit trail
     fallbackAddAuditLog(
       cleanUsername,
@@ -533,9 +593,9 @@ export const dbService = {
   /**
    * Log into checking credentials
    */
-  async signIn(emailOrUsername: string, passwordOrPin: string): Promise<BankUser> {
+  async signIn(emailOrUsername: string, passwordOrPin: string, forceLocalFallback = false): Promise<BankUser> {
     const key = emailOrUsername.toLowerCase().trim();
-    const mode = getActiveMode();
+    const mode = forceLocalFallback ? "fallback_secure" : getActiveMode();
 
     if (mode === "firebase") {
       try {
@@ -722,8 +782,7 @@ export const dbService = {
           console.warn(
             "[Firebase Login Fallback] Firebase Email/Password provider is disabled. Falling back automatically to Local Secure checks."
           );
-          localStorage.setItem("active_db_driver", "fallback_secure");
-          return await dbService.signIn(emailOrUsername, passwordOrPin);
+          return await dbService.signIn(emailOrUsername, passwordOrPin, true);
         }
         // Rethrow standard unauthorized auth exceptions clearly
         if (
@@ -827,7 +886,8 @@ export const dbService = {
       try {
         console.log("[Firebase] Saving/updating user profile doc in Firestore...");
         const { doc, setDoc } = await import("firebase/firestore");
-        const userRef = doc(firebaseDb, "users", user.id);
+        const collectionName = user.role === "admin" ? "admins" : "users";
+        const userRef = doc(firebaseDb, collectionName, user.id);
         
         // Remove undefined properties to avoid Firestore validation errors
         const cleanUser = JSON.parse(JSON.stringify(user));

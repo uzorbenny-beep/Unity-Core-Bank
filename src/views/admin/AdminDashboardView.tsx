@@ -270,23 +270,12 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
       }
 
       if (fetchedUsers.length > 0) {
-        const localList = loadUsersData();
-        const mergedList = [...localList];
-
-        fetchedUsers.forEach((fUser) => {
-          const existIdx = mergedList.findIndex((u) => u.id === fUser.id || u.username === fUser.username);
-          if (existIdx !== -1) {
-            mergedList[existIdx] = { ...mergedList[existIdx], ...fUser };
-          } else {
-            mergedList.push(fUser);
-          }
-        });
-
-        saveUsersData(mergedList);
-        setUsers(mergedList);
+        // Save and render central Firestore data as 1:1 absolute state
+        saveUsersData(fetchedUsers);
+        setUsers(fetchedUsers);
         setSyncStatus('Live cloud database in sync!');
       } else {
-        setSyncStatus('Sync complete: No cloud users online.');
+        setSyncStatus('Sync complete: No cloud users found.');
       }
     } catch (err: any) {
       console.error('[Firebase Synchronizer] Sync failed:', err);
@@ -298,7 +287,98 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
   };
 
   useEffect(() => {
-    syncUsersFromFirestore();
+    let unsubscribeUsers: (() => void) | undefined;
+
+    const setupLiveListeners = async () => {
+      try {
+        const { getActiveMode } = await import('../../dbService');
+        if (getActiveMode() !== 'firebase') {
+          // If not in firebase mode, just fall back to standard initial sync
+          syncUsersFromFirestore();
+          return;
+        }
+
+        const { db } = await import('../../firebase');
+        const { collection, onSnapshot, getDocs } = await import('firebase/firestore');
+
+        if (!db) return;
+
+        setIsSyncing(true);
+        setSyncStatus('Establishing real-time cloud sync channel...');
+        console.log('[Firebase Synchronizer] Subscribing to real-time users collection updates...');
+
+        unsubscribeUsers = onSnapshot(collection(db, 'users'), async (snapshot) => {
+          const fetchedUsers: BankUser[] = [];
+          
+          for (const docObj of snapshot.docs) {
+            const uData = docObj.data() as BankUser;
+            try {
+              // Fetch nested transaction registries for full ledger details
+              const txSnap = await getDocs(collection(db, 'users', docObj.id, 'transactions'));
+              const fetchedTx: Transaction[] = [];
+              txSnap.forEach((txDoc) => {
+                fetchedTx.push(txDoc.data() as Transaction);
+              });
+              fetchedTx.sort((a, b) => b.timestamp - a.timestamp);
+              uData.transactions = fetchedTx;
+            } catch (txErr) {
+              console.warn(`[Firebase Synchronizer] Transactions fetch failed for live user: ${docObj.id}`, txErr);
+            }
+            fetchedUsers.push(uData);
+          }
+
+          // Fetch admin roles from admins collection to make sure we show them too
+          try {
+            const adminsSnap = await getDocs(collection(db, 'admins'));
+            for (const docObj of adminsSnap.docs) {
+              const aData = docObj.data() as BankUser;
+              if (!fetchedUsers.some((u) => u.id === aData.id)) {
+                try {
+                  const txSnap = await getDocs(collection(db, 'admins', docObj.id, 'transactions'));
+                  const fetchedTx: Transaction[] = [];
+                  txSnap.forEach((txDoc) => {
+                    fetchedTx.push(txDoc.data() as Transaction);
+                  });
+                  fetchedTx.sort((a, b) => b.timestamp - a.timestamp);
+                  aData.transactions = fetchedTx;
+                } catch (txErr) {
+                  console.warn(`[Firebase Synchronizer] Transactions fetch failed for live admin: ${docObj.id}`, txErr);
+                }
+                fetchedUsers.push(aData);
+              }
+            }
+          } catch (admErr) {
+            console.warn('[Firebase Synchronizer] Bypass live admin query:', admErr);
+          }
+
+          if (fetchedUsers.length > 0) {
+            // Firestore is the absolute central source of truth. Save and render exact active cloud collection state.
+            saveUsersData(fetchedUsers);
+            setUsers(fetchedUsers);
+            setSyncStatus('Live cloud database in sync!');
+          }
+        }, (err) => {
+          console.error('[Firebase Synchronizer] Subscriber failed:', err);
+          setSyncStatus(`Sync issue: ${err.message}`);
+        });
+
+      } catch (err: any) {
+        console.error('[Firebase Synchronizer] Setup failed:', err);
+        syncUsersFromFirestore(); // Fallback to classic sync
+      } finally {
+        setIsSyncing(false);
+        setTimeout(() => setSyncStatus(''), 3500);
+      }
+    };
+
+    setupLiveListeners();
+
+    return () => {
+      if (unsubscribeUsers) {
+        console.log('[Firebase Synchronizer] Unsubscribing real-time listeners.');
+        unsubscribeUsers();
+      }
+    };
   }, []);
   
   // Custom user editing state
