@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Layers, 
@@ -201,6 +201,105 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
   // State from LocalStorage
   const [users, setUsers] = useState<BankUser[]>(() => loadUsersData());
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() => loadAuditLogs());
+
+  // 📡 Live Firebase Cloud Sync states & processor
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
+
+  const syncUsersFromFirestore = async () => {
+    try {
+      const { getActiveMode } = await import('../../dbService');
+      if (getActiveMode() !== 'firebase') return;
+
+      setIsSyncing(true);
+      setSyncStatus('Synchronizing cloud user databases...');
+      console.log('[Firebase Synchronizer] Syncing accounts from Firestore...');
+
+      const { db } = await import('../../firebase');
+      const { collection, getDocs } = await import('firebase/firestore');
+
+      if (!db) {
+        setIsSyncing(false);
+        return;
+      }
+
+      // 1. Fetch user docs from Firestore 'users' collection
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const fetchedUsers: BankUser[] = [];
+
+      for (const docObj of usersSnap.docs) {
+        const uData = docObj.data() as BankUser;
+        // Fetch each user's transactions subcollection
+        try {
+          const txSnap = await getDocs(collection(db, 'users', docObj.id, 'transactions'));
+          const fetchedTx: Transaction[] = [];
+          txSnap.forEach((txDoc) => {
+            fetchedTx.push(txDoc.data() as Transaction);
+          });
+          fetchedTx.sort((a, b) => b.timestamp - a.timestamp);
+          uData.transactions = fetchedTx;
+        } catch (txErr) {
+          console.warn(`[Firebase Synchronizer] Transactions fetch failed for ${docObj.id}:`, txErr);
+        }
+        fetchedUsers.push(uData);
+      }
+
+      // 2. Fetch admin profiles from 'admins' collection
+      try {
+        const adminsSnap = await getDocs(collection(db, 'admins'));
+        for (const docObj of adminsSnap.docs) {
+          const aData = docObj.data() as BankUser;
+          if (!fetchedUsers.some((u) => u.id === aData.id)) {
+            // Also fetch transactions for admin as safe measure
+            try {
+              const txSnap = await getDocs(collection(db, 'admins', docObj.id, 'transactions'));
+              const fetchedTx: Transaction[] = [];
+              txSnap.forEach((txDoc) => {
+                fetchedTx.push(txDoc.data() as Transaction);
+              });
+              fetchedTx.sort((a, b) => b.timestamp - a.timestamp);
+              aData.transactions = fetchedTx;
+            } catch (txErr) {
+              console.warn(`[Firebase Synchronizer] Transactions fetch failed for admin ${docObj.id}:`, txErr);
+            }
+            fetchedUsers.push(aData);
+          }
+        }
+      } catch (admErr) {
+        console.warn('[Firebase Synchronizer] Admins snapshot collection bypass:', admErr);
+      }
+
+      if (fetchedUsers.length > 0) {
+        const localList = loadUsersData();
+        const mergedList = [...localList];
+
+        fetchedUsers.forEach((fUser) => {
+          const existIdx = mergedList.findIndex((u) => u.id === fUser.id || u.username === fUser.username);
+          if (existIdx !== -1) {
+            mergedList[existIdx] = { ...mergedList[existIdx], ...fUser };
+          } else {
+            mergedList.push(fUser);
+          }
+        });
+
+        saveUsersData(mergedList);
+        setUsers(mergedList);
+        setSyncStatus('Live cloud database in sync!');
+      } else {
+        setSyncStatus('Sync complete: No cloud users online.');
+      }
+    } catch (err: any) {
+      console.error('[Firebase Synchronizer] Sync failed:', err);
+      setSyncStatus(`Sync error: ${err.message || 'Check firestore.rules'}`);
+    } finally {
+      setIsSyncing(false);
+      setTimeout(() => setSyncStatus(''), 3500);
+    }
+  };
+
+  useEffect(() => {
+    syncUsersFromFirestore();
+  }, []);
   
   // Custom user editing state
   const [selectedEditUser, setSelectedEditUser] = useState<BankUser | null>(null);
@@ -256,6 +355,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
     setUsers(loadUsersData());
     setAuditLogs(loadAuditLogs());
     onRefreshData();
+    syncUsersFromFirestore();
   };
 
   // Modify Balance & Account Parameters Executions
@@ -889,6 +989,19 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
       </div>
 
       <main className="flex-grow p-5 max-w-lg w-full mx-auto pb-10">
+
+        {/* 📡 Live Firebase Cloud Sync status */}
+        {syncStatus && (
+          <div className="mb-4 p-3 bg-indigo-50/90 border border-indigo-200 text-indigo-800 rounded-xl text-xs flex items-center justify-between shadow-xs animate-pulse">
+            <div className="flex items-center gap-2">
+              <span className="text-base text-indigo-600">📡</span>
+              <span className="font-semibold font-mono">{syncStatus}</span>
+            </div>
+            {isSyncing && (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+            )}
+          </div>
+        )}
 
         {/* Global balance edit success alert */}
         {editSuccessMsg && (

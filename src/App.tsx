@@ -67,7 +67,15 @@ export function generateUniqueIBAN(): string {
 export default function App() {
   const [currentView, setCurrentView] = useState<
     "landing" | "login" | "register" | "user-dashboard" | "admin-dashboard" | "verification-pending"
-  >("landing");
+  >(() => {
+    if (typeof window !== "undefined") {
+      const path = window.location.pathname;
+      if (path === "/admin" || path.endsWith("/admin")) {
+        return "login";
+      }
+    }
+    return "landing";
+  });
   const [activeUser, setActiveUser] = useState<BankUser | null>(null);
 
   // Mandated Config Cleanup
@@ -79,6 +87,67 @@ export default function App() {
       // Ignored
     }
   }, []);
+
+  // 📡 Single Page Router: Synchronize browser address bar with App state
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const path = window.location.pathname;
+
+    if (currentView === "admin-dashboard") {
+      if (path !== "/admin") {
+        window.history.pushState(null, "", "/admin");
+      }
+    } else if (currentView === "user-dashboard") {
+      if (path !== "/dashboard") {
+        window.history.pushState(null, "", "/dashboard");
+      }
+    } else if (currentView === "login") {
+      if (path !== "/admin" && !path.endsWith("/admin") && path !== "/login") {
+        window.history.pushState(null, "", "/login");
+      }
+    } else if (currentView === "register") {
+      if (path !== "/register") {
+        window.history.pushState(null, "", "/register");
+      }
+    } else if (currentView === "landing") {
+      if (path !== "/") {
+        window.history.pushState(null, "", "/");
+      }
+    }
+  }, [currentView]);
+
+  // 📡 Single Page Router: Handle physical browser Back/Forward navigation triggers
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const handlePopState = () => {
+      const path = window.location.pathname;
+      if (path === "/admin" || path.endsWith("/admin")) {
+        if (activeUser && activeUser.role === "admin") {
+          setCurrentView("admin-dashboard");
+        } else {
+          setCurrentView("login");
+        }
+      } else if (path === "/dashboard" || path === "/user" || path === "/user-dashboard") {
+        if (activeUser) {
+          setCurrentView("user-dashboard");
+        } else {
+          setCurrentView("login");
+        }
+      } else if (path === "/register") {
+        setCurrentView("register");
+      } else if (path === "/login") {
+        setCurrentView("login");
+      } else {
+        setCurrentView("landing");
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [activeUser]);
 
   // Listen to Firebase Authenticators to sync state
   useEffect(() => {

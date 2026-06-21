@@ -15,8 +15,9 @@ interface LoginViewProps {
 }
 
 export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogleLogin }: LoginViewProps) {
+  const isAdminPath = typeof window !== 'undefined' && (window.location.pathname === '/admin' || window.location.pathname.endsWith('/admin'));
   const [bankingTab, setBankingTab] = useState<'personal' | 'business'>('personal');
-  const [username, setUsername] = useState('james');
+  const [username, setUsername] = useState(isAdminPath ? 'admin' : 'james');
   const [password, setPassword] = useState('password123');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
@@ -141,41 +142,76 @@ export default function LoginView({ onBack, onNavigate, onLoginSuccess, onGoogle
           </svg>
           <div className="text-left">
             <h1 className="text-base font-extrabold tracking-[0.2em] text-white uppercase leading-none">UNITYCORE</h1>
-            <span className="text-sm font-light tracking-[0.14em] text-blue-400 leading-tight">BANK</span>
+            <span className="text-sm font-light tracking-[0.14em] text-amber-500 leading-tight">
+              {isAdminPath ? 'ADMIN PORTAL' : 'BANK'}
+            </span>
           </div>
         </div>
 
         {/* Welcome Back & Subheader */}
         <div className="text-center mb-6">
-          <h2 className="text-2xl font-bold text-white tracking-tight">Welcome back</h2>
-          <p className="text-xs text-slate-400 mt-1">Sign in to access your account</p>
+          <h2 className="text-2xl font-bold text-white tracking-tight">
+            {isAdminPath ? 'Authorized Node' : 'Welcome back'}
+          </h2>
+          <p className="text-xs text-slate-400 mt-1">
+            {isAdminPath ? 'Access corporate security & customer profiles registry' : 'Sign in to access your account'}
+          </p>
         </div>
 
         {/* Tab Selector Buttons */}
-        <div className="flex border-b border-slate-800 mb-6">
-          <button
-            type="button"
-            onClick={() => setBankingTab('personal')}
-            className={`flex-1 pb-2.5 text-xs font-bold text-center transition-all cursor-pointer ${
-              bankingTab === 'personal'
-                ? 'text-blue-450 text-blue-400 border-b-2 border-blue-500 font-extrabold'
-                : 'text-slate-500 hover:text-slate-400'
-            }`}
-          >
-            Personal Banking
-          </button>
-          <button
-            type="button"
-            onClick={() => setBankingTab('business')}
-            className={`flex-1 pb-2.5 text-xs font-bold text-center transition-all cursor-pointer ${
-              bankingTab === 'business'
-                ? 'text-blue-450 text-blue-400 border-b-2 border-blue-500 font-extrabold'
-                : 'text-slate-500 hover:text-slate-400'
-            }`}
-          >
-            Business Banking
-          </button>
-        </div>
+        {!isAdminPath && (
+          <div className="flex border-b border-slate-800 mb-6">
+            <button
+              type="button"
+              onClick={() => setBankingTab('personal')}
+              className={`flex-1 pb-2.5 text-xs font-bold text-center transition-all cursor-pointer ${
+                bankingTab === 'personal'
+                  ? 'text-blue-450 text-blue-400 border-b-2 border-blue-500 font-extrabold'
+                  : 'text-slate-500 hover:text-slate-400'
+              }`}
+            >
+              Personal Banking
+            </button>
+            <button
+              type="button"
+              onClick={() => setBankingTab('business')}
+              className={`flex-1 pb-2.5 text-xs font-bold text-center transition-all cursor-pointer ${
+                bankingTab === 'business'
+                  ? 'text-blue-450 text-blue-400 border-b-2 border-blue-500 font-extrabold'
+                  : 'text-slate-500 hover:text-slate-400'
+              }`}
+            >
+              Business Banking
+            </button>
+          </div>
+        )}
+
+        {/* Admin secure guidance badge */}
+        {isAdminPath && (
+          <div className="mb-6 bg-slate-950/80 border border-amber-500/30 p-4 rounded-2xl text-left shadow-sm space-y-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs">🔑</span>
+              <span className="text-[10px] font-bold text-amber-500 uppercase tracking-widest font-mono">Bypass Admin Credentials</span>
+            </div>
+            <p className="text-[11px] text-slate-350 leading-relaxed font-sans">
+              Enter official administrative credentials to access the live Unity Core database registry workspace:
+            </p>
+            <div className="text-[10px] bg-slate-900 border border-slate-800 p-2 rounded-xl font-mono text-slate-300 space-y-1">
+              <div className="flex justify-between">
+                <span className="text-amber-500 font-bold">Username:</span>
+                <span>admin</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-amber-500 font-bold">Email:</span>
+                <span>admin@unitycore.bank</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-amber-500 font-bold">Password:</span>
+                <span>password123</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Form Container */}
         <form onSubmit={handleSubmit} className="space-y-4">
