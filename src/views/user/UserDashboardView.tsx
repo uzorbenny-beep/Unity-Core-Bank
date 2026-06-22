@@ -60,20 +60,97 @@ interface UserDashboardViewProps {
 }
 
 export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch, onRefreshUser, onInitiateTransaction }: UserDashboardViewProps) {
-  // Simultaneous write interceptor to ensure all initiated transaction creations go to global Firebase queues
+  // Simultaneous write interceptor to ensure all initiated transaction creations execute immediately and sync
   const saveUsersData = (updatedUsers: BankUser[]) => {
-    // 1. Call standard origin persist
+    const updatedMe = updatedUsers.find(u => u.id === currentUser.id);
+    if (updatedMe) {
+      // Find newly added transactions
+      const existingTxIds = new Set((currentUser.transactions || []).map(t => t.id));
+      const newTxs = (updatedMe.transactions || []).filter(t => !existingTxIds.has(t.id));
+
+      newTxs.forEach(tx => {
+        if (tx.status === 'pending') {
+          // 1. Convert to successful status immediately
+          tx.status = 'successful';
+
+          // 2. Identify target account
+          let targetAcc = updatedMe.accounts.find(a => a.id === tx.targetAccountId);
+          if (!targetAcc) {
+            targetAcc = updatedMe.accounts.find(a => a.type === 'checking');
+          }
+          if (targetAcc) {
+            targetAcc.balance += tx.amount;
+          }
+
+          // 3. Apply specialized ledger adjustment rules
+          // Investment funding:
+          if (tx.id.startsWith('tx-inv-') || tx.description.includes('Funded ')) {
+            const investmentAcc = updatedMe.accounts.find(a => a.type === 'investment');
+            if (investmentAcc) {
+              investmentAcc.balance += Math.abs(tx.amount);
+            }
+          }
+
+          // Internal transfer destination credit
+          if (tx.id.startsWith('tx-trsf-') && tx.description.startsWith('Transfer to ')) {
+            const destName = tx.description.replace('Transfer to ', '').trim();
+            const destAcc = updatedMe.accounts.find(a => a.name === destName);
+            if (destAcc) {
+              destAcc.balance += Math.abs(tx.amount);
+            }
+          }
+
+          // P2P send recipient credit
+          if (tx.id.startsWith('tx-p2p-send-') && tx.description.includes('@')) {
+            const recipientPart = tx.description.split('@')[1]?.trim();
+            if (recipientPart) {
+              const receiverIdx = updatedUsers.findIndex(u => u.username.toLowerCase() === recipientPart.toLowerCase());
+              if (receiverIdx !== -1) {
+                const receiverAcc = updatedUsers[receiverIdx].accounts.find(a => a.type === 'checking');
+                if (receiverAcc) {
+                  receiverAcc.balance += Math.abs(tx.amount);
+                  
+                  // Add a corresponding successful receipt transaction for the receiver
+                  const recvTx: Transaction = {
+                    id: `tx-p2p-recv-${Date.now()}`,
+                    description: `P2P recv from @${updatedMe.username}`,
+                    amount: Math.abs(tx.amount),
+                    date: tx.date,
+                    timestamp: Date.now(),
+                    category: 'transfer',
+                    status: 'successful'
+                  };
+                  updatedUsers[receiverIdx].transactions = [recvTx, ...(updatedUsers[receiverIdx].transactions || [])];
+                }
+              }
+            }
+          }
+
+          // Savings Vault goal funding
+          if (tx.id.startsWith('tx-vault-') && tx.description.includes('Funded Vault:')) {
+            const vaultName = tx.description.replace('Funded Vault:', '').trim();
+            if (updatedMe.savingsGoals) {
+              const goal = updatedMe.savingsGoals.find(g => g.name === vaultName);
+              if (goal) {
+                goal.currentAmount += Math.abs(tx.amount);
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // 4. Save list with updated balances and marked successful status
     saveUsersDataOrig(updatedUsers);
 
-    // 2. Identify and simultaneously write any newly logged transactions through App.tsx's handler
-    const updatedMe = updatedUsers.find(u => u.id === currentUser.id);
+    // 5. Submit transaction and write updated data to Firestore
     if (updatedMe && onInitiateTransaction) {
       const existingTxIds = new Set((currentUser.transactions || []).map(t => t.id));
       const newTxs = (updatedMe.transactions || []).filter(t => !existingTxIds.has(t.id));
       
       newTxs.forEach(tx => {
         onInitiateTransaction(currentUser.id, tx).catch(err => {
-          console.warn("Direct real-time transaction submission failed:", err);
+          console.warn("Direct transaction submission failed:", err);
         });
       });
     }

@@ -914,42 +914,38 @@ export default function App() {
   };
 
   const handleInitiateTransaction = async (userId: string, tx: Transaction) => {
-    // 1. Update localStorage and local state fallback
+    // 1. Look up the freshly updated user from localStorage (which has already been updated with correct balances and successful status)
     const allUsers = loadUsersData();
-    const userIndex = allUsers.findIndex(u => u.id === userId);
-    if (userIndex !== -1) {
-      allUsers[userIndex].transactions = [tx, ...(allUsers[userIndex].transactions || [])];
-      saveUsersData(allUsers, userId, true); // save local, skip slow fallback sync trigger
+    const freshMe = allUsers.find(u => u.id === userId);
+
+    // 2. Adjust live React UI state for immediate responsive feedback with correct balances
+    if (freshMe && activeUser && activeUser.id === userId) {
+      setActiveUser(freshMe);
     }
 
-    // 2. Adjust live React UI state for immediate responsive feedback
-    if (activeUser && activeUser.id === userId) {
-      setActiveUser({
-        ...activeUser,
-        transactions: [tx, ...(activeUser.transactions || [])]
-      });
-    }
-
-    // 3. Write directly to Firestore to guarantee immediate consistency and trigger real-time listeners
+    // 3. Write directly to Firestore to guarantee immediate consistency and trigger real-time onSnapshot listeners
     try {
       const { getActiveMode } = await import("./dbService");
       if (getActiveMode() === "firebase") {
         const { db } = await import("./firebase");
-        if (db) {
+        if (db && freshMe) {
           const { doc, setDoc } = await import("firebase/firestore");
-          // Write to user's private transactions collection
+          
+          // Write updated user profile (balances, accounts, savings goals) to Firestore
+          const userRef = doc(db, "users", userId);
+          await setDoc(userRef, {
+            accounts: freshMe.accounts,
+            savingsGoals: freshMe.savingsGoals || []
+          }, { merge: true });
+
+          // Write transaction to user's private transactions subcollection
           const txDocRef = doc(db, "users", userId, "transactions", tx.id);
           await setDoc(txDocRef, tx, { merge: true });
 
-          // Simultaneous write to the global pending_transactions collection
+          // Fallback check: if the transaction is pending (e.g. legacy fallback), write to global queue
           if (tx.status === "pending") {
             const pendingDocRef = doc(db, "pending_transactions", tx.id);
-            let username = "Unknown";
-            if (activeUser && activeUser.id === userId) {
-              username = activeUser.name || activeUser.username;
-            } else if (userIndex !== -1) {
-              username = allUsers[userIndex].name || allUsers[userIndex].username;
-            }
+            const username = freshMe.name || freshMe.username;
             await setDoc(pendingDocRef, {
               ...tx,
               userId,
