@@ -363,5 +363,40 @@ export const notificationService = {
         ]
       }
     );
+  },
+
+  // G. Admin Approval/Rejection Decision
+  async sendApprovalDecisionAlert(
+    user: BankUser,
+    transaction: any,
+    decision: "approved" | "rejected",
+    adminName: string
+  ): Promise<void> {
+    const isDeposit = transaction.amount >= 0;
+    const typeLabel = isDeposit ? "Deposit" : "Withdrawal";
+    const statusLabel = decision === "approved" ? "APPROVED" : "DECLINED";
+    const statusSymbol = decision === "approved" ? "🟩" : "🟥";
+    const formattedAmount = `${user.currency || "USD"} ${Math.abs(transaction.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+
+    await this.triggerActivityAlert(
+      user,
+      "transaction",
+      `🔔 Administrative Decision: ${statusLabel}`,
+      `Your pending ${typeLabel} of ${formattedAmount} for "${transaction.description}" has been ${statusLabel.toLowerCase()} by Security Officer ${adminName}.`,
+      {
+        paragraphs: [
+          `An administrative review has been completed for your pending ${typeLabel.toLowerCase()} by our Compliance Clearance team.`,
+          `Status Summary:`,
+          `- Decision: ${statusSymbol} ${statusLabel}`,
+          `- Reference: ${transaction.description}`,
+          `- Amount: ${formattedAmount}`,
+          `- Authorized Officer: ${adminName}`,
+          `- Timestamp: ${new Date().toLocaleString()}`,
+          decision === "approved" 
+            ? "The balance has been adjusted and credited successfully to your targeted account ledger." 
+            : "The ledger clearance request has been voided. Please contact our administrative helpdesk for compliance details."
+        ]
+      }
+    );
   }
 };

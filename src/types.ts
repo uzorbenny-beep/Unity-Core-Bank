@@ -13,6 +13,9 @@ export interface Transaction {
   logo?: string; // Icon or path
   status?: 'successful' | 'pending' | 'declined';
   targetAccountId?: string;
+  approvedByAdminId?: string;
+  approvedByAdminName?: string;
+  approvalTimestamp?: number;
 }
 
 export interface Account {
@@ -51,6 +54,10 @@ export interface AuditLog {
   action: string;
   details: string;
   status: 'success' | 'failed' | 'warning';
+  targetTxId?: string;
+  approvedByAdminId?: string;
+  approvedByAdminName?: string;
+  approvalTimestamp?: string;
 }
 
 export interface SavingsGoal {

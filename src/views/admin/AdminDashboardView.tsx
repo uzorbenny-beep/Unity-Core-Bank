@@ -229,17 +229,21 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
       for (const docObj of usersSnap.docs) {
         const uData = docObj.data() as BankUser;
+        const mergedTx: Transaction[] = uData.transactions || [];
         // Fetch each user's transactions subcollection
         try {
           const txSnap = await getDocs(collection(db, 'users', docObj.id, 'transactions'));
-          const fetchedTx: Transaction[] = [];
           txSnap.forEach((txDoc) => {
-            fetchedTx.push(txDoc.data() as Transaction);
+            const txData = txDoc.data() as Transaction;
+            if (!mergedTx.some((t) => t.id === txData.id)) {
+              mergedTx.push(txData);
+            }
           });
-          fetchedTx.sort((a, b) => b.timestamp - a.timestamp);
-          uData.transactions = fetchedTx;
+          mergedTx.sort((a, b) => b.timestamp - a.timestamp);
+          uData.transactions = mergedTx;
         } catch (txErr) {
           console.warn(`[Firebase Synchronizer] Transactions fetch failed for ${docObj.id}:`, txErr);
+          uData.transactions = mergedTx;
         }
         fetchedUsers.push(uData);
       }
@@ -250,17 +254,21 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
         for (const docObj of adminsSnap.docs) {
           const aData = docObj.data() as BankUser;
           if (!fetchedUsers.some((u) => u.id === aData.id)) {
+            const mergedTx: Transaction[] = aData.transactions || [];
             // Also fetch transactions for admin as safe measure
             try {
               const txSnap = await getDocs(collection(db, 'admins', docObj.id, 'transactions'));
-              const fetchedTx: Transaction[] = [];
               txSnap.forEach((txDoc) => {
-                fetchedTx.push(txDoc.data() as Transaction);
+                const txData = txDoc.data() as Transaction;
+                if (!mergedTx.some((t) => t.id === txData.id)) {
+                  mergedTx.push(txData);
+                }
               });
-              fetchedTx.sort((a, b) => b.timestamp - a.timestamp);
-              aData.transactions = fetchedTx;
+              mergedTx.sort((a, b) => b.timestamp - a.timestamp);
+              aData.transactions = mergedTx;
             } catch (txErr) {
               console.warn(`[Firebase Synchronizer] Transactions fetch failed for admin ${docObj.id}:`, txErr);
+              aData.transactions = mergedTx;
             }
             fetchedUsers.push(aData);
           }
@@ -312,17 +320,21 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
           
           for (const docObj of snapshot.docs) {
             const uData = docObj.data() as BankUser;
+            const mergedTx: Transaction[] = uData.transactions || [];
             try {
               // Fetch nested transaction registries for full ledger details
               const txSnap = await getDocs(collection(db, 'users', docObj.id, 'transactions'));
-              const fetchedTx: Transaction[] = [];
               txSnap.forEach((txDoc) => {
-                fetchedTx.push(txDoc.data() as Transaction);
+                const txData = txDoc.data() as Transaction;
+                if (!mergedTx.some((t) => t.id === txData.id)) {
+                  mergedTx.push(txData);
+                }
               });
-              fetchedTx.sort((a, b) => b.timestamp - a.timestamp);
-              uData.transactions = fetchedTx;
+              mergedTx.sort((a, b) => b.timestamp - a.timestamp);
+              uData.transactions = mergedTx;
             } catch (txErr) {
               console.warn(`[Firebase Synchronizer] Transactions fetch failed for live user: ${docObj.id}`, txErr);
+              uData.transactions = mergedTx;
             }
             fetchedUsers.push(uData);
           }
@@ -333,16 +345,20 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
             for (const docObj of adminsSnap.docs) {
               const aData = docObj.data() as BankUser;
               if (!fetchedUsers.some((u) => u.id === aData.id)) {
+                const mergedTx: Transaction[] = aData.transactions || [];
                 try {
                   const txSnap = await getDocs(collection(db, 'admins', docObj.id, 'transactions'));
-                  const fetchedTx: Transaction[] = [];
                   txSnap.forEach((txDoc) => {
-                    fetchedTx.push(txDoc.data() as Transaction);
+                    const txData = txDoc.data() as Transaction;
+                    if (!mergedTx.some((t) => t.id === txData.id)) {
+                      mergedTx.push(txData);
+                    }
                   });
-                  fetchedTx.sort((a, b) => b.timestamp - a.timestamp);
-                  aData.transactions = fetchedTx;
+                  mergedTx.sort((a, b) => b.timestamp - a.timestamp);
+                  aData.transactions = mergedTx;
                 } catch (txErr) {
                   console.warn(`[Firebase Synchronizer] Transactions fetch failed for live admin: ${docObj.id}`, txErr);
+                  aData.transactions = mergedTx;
                 }
                 fetchedUsers.push(aData);
               }
@@ -801,6 +817,9 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
           }
           
           transaction.status = newStatus;
+          transaction.approvedByAdminId = currentAdmin.id;
+          transaction.approvedByAdminName = currentAdmin.name || currentAdmin.username;
+          transaction.approvalTimestamp = Date.now();
           saveUsersData(allUsers, userId);
 
           // If the status is approved and becomes successful, send confirmation alert email
@@ -812,6 +831,14 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
               `${transaction.description} (Approved by Security Command)`,
               flowDirection
             ).catch(err => console.error("Error sending admin approval alert email:", err));
+
+            // Run automated approval clearance notification
+            notificationService.sendApprovalDecisionAlert(
+              allUsers[userIdx],
+              transaction,
+              'approved',
+              currentAdmin.name || currentAdmin.username
+            ).catch(err => console.error("Error sending admin approval notification:", err));
           } else if (newStatus === 'declined') {
             notificationService.sendTransactionAlert(
               allUsers[userIdx],
@@ -819,13 +846,28 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
               `DECLINED: ${transaction.description}`,
               transaction.amount >= 0 ? 'credit' : 'debit'
             ).catch(err => console.error("Error sending admin declining action notification:", err));
+
+            // Run automated rejection clearance notification
+            notificationService.sendApprovalDecisionAlert(
+              allUsers[userIdx],
+              transaction,
+              'rejected',
+              currentAdmin.name || currentAdmin.username
+            ).catch(err => console.error("Error sending admin rejection notification:", err));
           }
           
           addAuditLog(
             currentAdmin.username,
             currentAdmin.id,
             'TX_STATUS_CHANGE',
-            `Changed status of tx "${transaction.description}" (${txId}) for ${allUsers[userIdx].name} to ${newStatus.toUpperCase()}. Applied adjustment of $${adjustment.toFixed(2)} to ${allUsers[userIdx].accounts.find(a => a.id === transaction.targetAccountId)?.name || 'Checking Account'}`
+            `Changed status of tx "${transaction.description}" (${txId}) for ${allUsers[userIdx].name} to ${newStatus.toUpperCase()}. Applied adjustment of $${adjustment.toFixed(2)} to ${allUsers[userIdx].accounts.find(a => a.id === transaction.targetAccountId)?.name || 'Checking Account'}`,
+            'success',
+            {
+              targetTxId: txId,
+              approvedByAdminId: currentAdmin.id,
+              approvedByAdminName: currentAdmin.name || currentAdmin.username,
+              approvalTimestamp: new Date().toISOString()
+            }
           );
           
           refreshLocalState();

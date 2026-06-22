@@ -501,7 +501,10 @@ export function saveUsersData(users: BankUser[], onlySyncUserId?: string, skipFi
               timestamp: Number(tx.timestamp) || Date.now(),
               category: tx.category || "",
               status: tx.status || "successful",
-              targetAccountId: tx.targetAccountId || ""
+              targetAccountId: tx.targetAccountId || "",
+              approvedByAdminId: tx.approvedByAdminId || "",
+              approvedByAdminName: tx.approvedByAdminName || "",
+              approvalTimestamp: tx.approvalTimestamp || 0
             }))
           };
 
@@ -537,7 +540,19 @@ export function saveAuditLogs(logs: AuditLog[]) {
   localStorage.setItem('unitycore_audit_logs', JSON.stringify(logs));
 }
 
-export function addAuditLog(username: string, userId: string, action: string, details: string, status: 'success' | 'failed' | 'warning' = 'success') {
+export function addAuditLog(
+  username: string,
+  userId: string,
+  action: string,
+  details: string,
+  status: 'success' | 'failed' | 'warning' = 'success',
+  extraFields?: {
+    targetTxId?: string;
+    approvedByAdminId?: string;
+    approvedByAdminName?: string;
+    approvalTimestamp?: string;
+  }
+) {
   const logs = loadAuditLogs();
   const newLog: AuditLog = {
     id: `log-${Date.now()}`,
@@ -546,7 +561,8 @@ export function addAuditLog(username: string, userId: string, action: string, de
     username,
     action,
     details,
-    status
+    status,
+    ...extraFields
   };
   saveAuditLogs([newLog, ...logs]);
 
