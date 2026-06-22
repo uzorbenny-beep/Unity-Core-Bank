@@ -546,6 +546,13 @@ export default function App() {
             // Write first transactions subcollection
             for (const tx of newGoogleUser.transactions) {
               await setDoc(doc(db, "users", uid, "transactions", tx.id), tx);
+              if (tx.status === "pending") {
+                await setDoc(doc(db, "pending_transactions", tx.id), {
+                  ...tx,
+                  userId: uid,
+                  username: newGoogleUser.name || newGoogleUser.username
+                }, { merge: true });
+              }
             }
 
             setActiveUser(newGoogleUser);
@@ -872,6 +879,13 @@ export default function App() {
             doc(db, "users", uid, "transactions", tx.id),
             tx,
           );
+          if (tx.status === "pending") {
+            await setDoc(doc(db, "pending_transactions", tx.id), {
+              ...tx,
+              userId: uid,
+              username: newUser.name || newUser.username
+            }, { merge: true });
+          }
         }
       } catch (firestoreError) {
         console.warn(
@@ -896,6 +910,56 @@ export default function App() {
     } catch (error: any) {
       console.error("Admin user creation system error:", error);
       throw error;
+    }
+  };
+
+  const handleInitiateTransaction = async (userId: string, tx: Transaction) => {
+    // 1. Update localStorage and local state fallback
+    const allUsers = loadUsersData();
+    const userIndex = allUsers.findIndex(u => u.id === userId);
+    if (userIndex !== -1) {
+      allUsers[userIndex].transactions = [tx, ...(allUsers[userIndex].transactions || [])];
+      saveUsersData(allUsers, userId, true); // save local, skip slow fallback sync trigger
+    }
+
+    // 2. Adjust live React UI state for immediate responsive feedback
+    if (activeUser && activeUser.id === userId) {
+      setActiveUser({
+        ...activeUser,
+        transactions: [tx, ...(activeUser.transactions || [])]
+      });
+    }
+
+    // 3. Write directly to Firestore to guarantee immediate consistency and trigger real-time listeners
+    try {
+      const { getActiveMode } = await import("./dbService");
+      if (getActiveMode() === "firebase") {
+        const { db } = await import("./firebase");
+        if (db) {
+          const { doc, setDoc } = await import("firebase/firestore");
+          // Write to user's private transactions collection
+          const txDocRef = doc(db, "users", userId, "transactions", tx.id);
+          await setDoc(txDocRef, tx, { merge: true });
+
+          // Simultaneous write to the global pending_transactions collection
+          if (tx.status === "pending") {
+            const pendingDocRef = doc(db, "pending_transactions", tx.id);
+            let username = "Unknown";
+            if (activeUser && activeUser.id === userId) {
+              username = activeUser.name || activeUser.username;
+            } else if (userIndex !== -1) {
+              username = allUsers[userIndex].name || allUsers[userIndex].username;
+            }
+            await setDoc(pendingDocRef, {
+              ...tx,
+              userId,
+              username
+            }, { merge: true });
+          }
+        }
+      }
+    } catch (fErr) {
+      console.warn("Firestore push in handleInitiateTransaction skipped or offline:", fErr);
     }
   };
 
@@ -981,6 +1045,7 @@ export default function App() {
             onLogout={handleLogout}
             onRoleSwitch={(role) => handleRoleToggle("admin")}
             onRefreshUser={handleReloadUserData}
+            onInitiateTransaction={handleInitiateTransaction}
           />
         )}
 

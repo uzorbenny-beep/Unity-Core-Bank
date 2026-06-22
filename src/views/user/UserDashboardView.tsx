@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import { BankUser, Account, Transaction, CreditCard, SavingsGoal, Biller, SupportTicket, BankNotification } from '../../types';
 import FinancialChart from '../../components/FinancialChart';
-import { saveUsersData, loadUsersData, addAuditLog, getRelativeDateString, formatTransactionDate, loadDepositWithdrawConfigs, DepositWithdrawMethodConfig } from '../../mockData';
+import { saveUsersData as saveUsersDataOrig, loadUsersData, addAuditLog, getRelativeDateString, formatTransactionDate, loadDepositWithdrawConfigs, DepositWithdrawMethodConfig } from '../../mockData';
 import { notificationService } from '../../notificationService';
 
 const TIMEZONES = [
@@ -56,9 +56,29 @@ interface UserDashboardViewProps {
   onLogout: () => void;
   onRoleSwitch: (role: 'admin') => void;
   onRefreshUser: (username: string) => void;
+  onInitiateTransaction?: (userId: string, tx: Transaction) => Promise<void>;
 }
 
-export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch, onRefreshUser }: UserDashboardViewProps) {
+export default function UserDashboardView({ currentUser, onLogout, onRoleSwitch, onRefreshUser, onInitiateTransaction }: UserDashboardViewProps) {
+  // Simultaneous write interceptor to ensure all initiated transaction creations go to global Firebase queues
+  const saveUsersData = (updatedUsers: BankUser[]) => {
+    // 1. Call standard origin persist
+    saveUsersDataOrig(updatedUsers);
+
+    // 2. Identify and simultaneously write any newly logged transactions through App.tsx's handler
+    const updatedMe = updatedUsers.find(u => u.id === currentUser.id);
+    if (updatedMe && onInitiateTransaction) {
+      const existingTxIds = new Set((currentUser.transactions || []).map(t => t.id));
+      const newTxs = (updatedMe.transactions || []).filter(t => !existingTxIds.has(t.id));
+      
+      newTxs.forEach(tx => {
+        onInitiateTransaction(currentUser.id, tx).catch(err => {
+          console.warn("Direct real-time transaction submission failed:", err);
+        });
+      });
+    }
+  };
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'accounts' | 'transfers' | 'cards' | 'more' | 'activity' | 'intl-wire' | 'deposit' | 'loan' | 'irs-refund' | 'support' | 'investment' | 'crypto' | 'grant' | 'vaults'>('dashboard');
   const [showBankingMenu, setShowBankingMenu] = useState(false);
 

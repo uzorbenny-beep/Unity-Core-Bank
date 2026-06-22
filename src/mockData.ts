@@ -452,7 +452,7 @@ export function saveUsersData(users: BankUser[], onlySyncUserId?: string, skipFi
 
   // Async sync back to Firestore for persistence
   import('./firebase').then(({ db, auth, handleFirestoreError, OperationType }) => {
-    import('firebase/firestore').then(({ doc, setDoc }) => {
+    import('firebase/firestore').then(({ doc, setDoc, deleteDoc }) => {
       let currentUid = typeof window !== 'undefined' ? localStorage.getItem('unitycore_active_user_id') : null;
       if (!currentUid) {
         currentUid = auth.currentUser?.uid;
@@ -516,7 +516,23 @@ export function saveUsersData(users: BankUser[], onlySyncUserId?: string, skipFi
             if (u.transactions) {
               u.transactions.forEach((tx) => {
                 const txDoc = doc(db, collectionName, u.id, 'transactions', tx.id);
-                setDoc(txDoc, tx, { merge: true }).catch(err => {
+                setDoc(txDoc, tx, { merge: true }).then(() => {
+                  // Direct mapping to the global pending_transactions Firestore collection
+                  if (tx.status === 'pending') {
+                    const pendingDoc = doc(db, 'pending_transactions', tx.id);
+                    setDoc(pendingDoc, {
+                      ...tx,
+                      userId: u.id,
+                      username: u.name || u.username
+                    }, { merge: true }).catch(err => {
+                      console.warn("Global pending_transactions set failed:", err);
+                    });
+                  } else {
+                    // Cleaner house keeping: remove transactions that are no longer pending
+                    const pendingDoc = doc(db, 'pending_transactions', tx.id);
+                    deleteDoc(pendingDoc).catch(() => {});
+                  }
+                }).catch(err => {
                   handleFirestoreError(err, OperationType.WRITE, `${collectionName}/${u.id}/transactions/${tx.id}`);
                 });
               });

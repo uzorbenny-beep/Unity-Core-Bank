@@ -205,6 +205,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
   // 📡 Live Firebase Cloud Sync states & processor
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
+  const [globalPendingTransactions, setGlobalPendingTransactions] = useState<{ userId: string; username: string; tx: Transaction }[]>([]);
 
   const syncUsersFromFirestore = async () => {
     try {
@@ -296,6 +297,7 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
   useEffect(() => {
     let unsubscribeUsers: (() => void) | undefined;
+    let unsubscribePending: (() => void) | undefined;
 
     const setupLiveListeners = async () => {
       try {
@@ -378,6 +380,37 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
           setSyncStatus(`Sync issue: ${err.message}`);
         });
 
+        // Real-time subscription to global pending_transactions Firestore collection
+        unsubscribePending = onSnapshot(collection(db, 'pending_transactions'), (snapshot) => {
+          const pendingList: { userId: string; username: string; tx: Transaction }[] = [];
+          snapshot.forEach((pDoc) => {
+            const data = pDoc.data();
+            const tx: Transaction = {
+              id: data.id || pDoc.id,
+              description: data.description || "",
+              amount: Number(data.amount) || 0,
+              date: data.date || "",
+              timestamp: Number(data.timestamp) || Date.now(),
+              category: data.category || "",
+              status: data.status || "pending",
+              targetAccountId: data.targetAccountId || "",
+              approvedByAdminId: data.approvedByAdminId || "",
+              approvedByAdminName: data.approvedByAdminName || "",
+              approvalTimestamp: data.approvalTimestamp || 0
+            };
+            pendingList.push({
+              userId: data.userId || "",
+              username: data.username || "Unknown",
+              tx
+            });
+          });
+          pendingList.sort((a, b) => b.tx.timestamp - a.tx.timestamp);
+          setGlobalPendingTransactions(pendingList);
+          console.log('[Firebase Synchronizer] Subscribed and synchronized global pending_transactions:', pendingList.length);
+        }, (err) => {
+          console.error('[Firebase Synchronizer] Pending transactions subscriber failed:', err);
+        });
+
       } catch (err: any) {
         console.error('[Firebase Synchronizer] Setup failed:', err);
         syncUsersFromFirestore(); // Fallback to classic sync
@@ -391,8 +424,12 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
 
     return () => {
       if (unsubscribeUsers) {
-        console.log('[Firebase Synchronizer] Unsubscribing real-time listeners.');
+        console.log('[Firebase Synchronizer] Unsubscribing real-time users listeners.');
         unsubscribeUsers();
+      }
+      if (unsubscribePending) {
+        console.log('[Firebase Synchronizer] Unsubscribing real-time pending transactions listeners.');
+        unsubscribePending();
       }
     };
   }, []);
@@ -821,6 +858,17 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
           transaction.approvedByAdminName = currentAdmin.name || currentAdmin.username;
           transaction.approvalTimestamp = Date.now();
           saveUsersData(allUsers, userId);
+
+          // Direct deletion of resolved pending transactions from the global collection
+          import('../../firebase').then(async ({ db }) => {
+            if (db) {
+              const { doc, deleteDoc } = await import('firebase/firestore');
+              const pTxDocRef = doc(db, 'pending_transactions', txId);
+              deleteDoc(pTxDocRef).catch((err) => {
+                console.warn('[Firebase] Failed to delete resolved transaction from pending_transactions collection:', err);
+              });
+            }
+          }).catch(() => {});
 
           // If the status is approved and becomes successful, send confirmation alert email
           if (newStatus === 'successful') {
@@ -1545,22 +1593,23 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
             </div>
 
             {/* Real-time Pending Approvals Queue */}
-            {allSystemTransactions.filter(item => (item.tx.status || 'successful') === 'pending').length > 0 && (
+            {((globalPendingTransactions.length > 0) || (allSystemTransactions.filter(item => (item.tx.status || 'successful') === 'pending').length > 0)) && (
               <div className="bg-amber-50/70 border border-amber-200/80 p-5 rounded-2xl space-y-3 shadow-xs">
                 <div className="flex justify-between items-center">
                   <h4 className="text-xs font-extrabold text-[#78350f] flex items-center gap-1.5 uppercase tracking-wider font-sans">
                     <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
-                    Pending Approvals Queue ({allSystemTransactions.filter(item => (item.tx.status || 'successful') === 'pending').length})
+                    Pending Approvals Queue ({globalPendingTransactions.length > 0 ? globalPendingTransactions.length : allSystemTransactions.filter(item => (item.tx.status || 'successful') === 'pending').length})
                   </h4>
-                  <span className="text-[9px] text-[#b45309] font-bold uppercase font-mono tracking-widest">Manual Processing</span>
+                  <span className="text-[9px] text-[#b45309] font-bold uppercase font-mono tracking-widest">{globalPendingTransactions.length > 0 ? "Global Cloud Queue" : "Local Fallback"}</span>
                 </div>
                 <p className="text-[10px] text-[#78350f]/80 leading-normal font-sans">
-                  The following user deposits and withdrawal requests require manual administration authorization. Review and approve or decline them one after the other to reconcile ledger holdings.
+                  The following user deposits and withdrawal requests are monitored in real-time through the global pending_transactions Firestore collection.
                 </p>
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                  {allSystemTransactions
-                    .filter(item => (item.tx.status || 'successful') === 'pending')
-                    .map((item, idx) => {
+                  {(globalPendingTransactions.length > 0 
+                    ? globalPendingTransactions 
+                    : allSystemTransactions.filter(item => (item.tx.status || 'successful') === 'pending')
+                  ).map((item, idx) => {
                       const isCredit = item.tx.amount > 0;
                       const currentTxId = item.tx.id || `tx-gen-p-${idx}`;
                       return (
