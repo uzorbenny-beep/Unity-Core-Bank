@@ -453,7 +453,10 @@ export function saveUsersData(users: BankUser[], onlySyncUserId?: string, skipFi
   // Async sync back to Firestore for persistence
   import('./firebase').then(({ db, auth, handleFirestoreError, OperationType }) => {
     import('firebase/firestore').then(({ doc, setDoc }) => {
-      const currentUid = auth.currentUser?.uid;
+      let currentUid = typeof window !== 'undefined' ? localStorage.getItem('unitycore_active_user_id') : null;
+      if (!currentUid) {
+        currentUid = auth.currentUser?.uid;
+      }
       if (!currentUid || !db) return;
 
       const currentUserInList = users.find(usr => usr.id === currentUid);

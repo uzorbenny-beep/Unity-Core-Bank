@@ -78,6 +78,15 @@ export default function App() {
   });
   const [activeUser, setActiveUser] = useState<BankUser | null>(null);
 
+  // Keep active user ID synced in localStorage for multi-view/role-switching consistency
+  useEffect(() => {
+    if (activeUser) {
+      localStorage.setItem("unitycore_active_user_id", activeUser.id);
+    } else {
+      localStorage.removeItem("unitycore_active_user_id");
+    }
+  }, [activeUser]);
+
   // Mandated Config Cleanup
   useEffect(() => {
     // Clear any custom config from browser memory to prevent stale database state
