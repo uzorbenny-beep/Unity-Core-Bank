@@ -593,35 +593,19 @@ export const dbService = {
 
         let emailToUse = key;
 
-        // A. Handle bypass users first (e.g. james, admin, credence, user with password123)
-        // so standard sandbox evaluations don't fail if they don't exist in Firebase Auth yet.
-        const isBypassUser = (
-          ["admin", "james", "credence", "user"].includes(key) ||
-          ["admin@unitycore.bank", "james@unitycore.com", "user@mail.com", "user@gmail.com"].includes(key)
-        ) && passwordOrPin === "password123";
-        if (isBypassUser) {
-          const localUsers = loadUsersData();
-          let found = localUsers.find((u) => u.username.toLowerCase() === key || u.email.toLowerCase() === key);
-          if (!found) {
-            if (key === "admin" || key === "admin@unitycore.bank") {
-              found = INITIAL_ADMIN;
-            } else if (key === "james" || key === "james@unitycore.com") {
-              found = INITIAL_USER;
-            } else if (key === "credence") {
-              found = INITIAL_CREDENCE_USER;
-            }
-          }
-          if (found) {
-            console.log("[Firebase] Local bypass applied for username/email:", key);
-            fallbackAddAuditLog(found.username, found.id, "LOGIN_SUCCESS", "Secured localized session successfully initialized via bypass.");
-            return found;
-          }
+        // Map standard usernames to real emails explicitly for pre-seed
+        if (key === "admin") {
+          emailToUse = "admin@unitycore.bank";
+        } else if (key === "james") {
+          emailToUse = "james@unitycore.com";
+        } else if (key === "credence" || key === "user") {
+          emailToUse = "user@mail.com";
         }
 
-        // B. Resolving email from username if they provided username
-        if (!key.includes("@")) {
+        // B. Resolving email from username if they provided username and it is not a standard seed
+        if (!emailToUse.includes("@")) {
           const usersCol = collection(firebaseDb, "users");
-          const q = query(usersCol, where("username", "==", key));
+          const q = query(usersCol, where("username", "==", emailToUse));
           const snap = await getDocs(q);
           if (!snap.empty) {
             const docData = snap.docs[0].data();
@@ -629,7 +613,7 @@ export const dbService = {
           } else {
             // Check admins
             const adminsCol = collection(firebaseDb, "admins");
-            const qAdmin = query(adminsCol, where("username", "==", key));
+            const qAdmin = query(adminsCol, where("username", "==", emailToUse));
             const snapAdmin = await getDocs(qAdmin);
             if (!snapAdmin.empty) {
               const docData = snapAdmin.docs[0].data();
@@ -639,7 +623,50 @@ export const dbService = {
         }
 
         // C. Authenticate with Firebase Auth
-        const userCred = await signInWithEmailAndPassword(firebaseAuth, emailToUse, passwordOrPin);
+        let userCred;
+        try {
+          userCred = await signInWithEmailAndPassword(firebaseAuth, emailToUse, passwordOrPin);
+        } catch (authErr: any) {
+          // If the user does not exist yet AND they typed password123 (and are one of our default seeds)
+          const isSeedEmail = ["admin@unitycore.bank", "james@unitycore.com", "user@mail.com", "user@gmail.com"].includes(emailToUse);
+          if (isSeedEmail && passwordOrPin === "password123" && (authErr.code === "auth/user-not-found" || authErr.code === "auth/invalid-credential" || authErr.code === "auth/invalid-email" || authErr.code === "auth/user-disabled")) {
+            console.log("[Firebase Auto-Seed] Registering seed account on Firebase...", emailToUse);
+            const { createUserWithEmailAndPassword } = await import("firebase/auth");
+            userCred = await createUserWithEmailAndPassword(firebaseAuth, emailToUse, passwordOrPin);
+            const uid = userCred.user.uid;
+
+            // Generate profile based on email
+            let seedUser: BankUser;
+            if (emailToUse === "admin@unitycore.bank") {
+              seedUser = { ...INITIAL_ADMIN, id: uid };
+            } else if (emailToUse === "james@unitycore.com") {
+              seedUser = { ...INITIAL_USER, id: uid };
+            } else {
+              seedUser = { ...INITIAL_CREDENCE_USER, id: uid };
+            }
+
+            const collectionName = seedUser.role === "admin" ? "admins" : "users";
+            const targetRef = doc(firebaseDb, collectionName, uid);
+            await setDoc(targetRef, seedUser);
+
+            if (seedUser.transactions) {
+              for (const tx of seedUser.transactions) {
+                const txDoc = doc(firebaseDb, collectionName, uid, "transactions", tx.id);
+                await setDoc(txDoc, tx);
+              }
+            }
+
+            console.log("[Firebase Auto-Seed] Seed account registered successfully!");
+            // Sync local cache
+            const localList = loadUsersData();
+            saveUsersData([...localList.filter((u) => u.id !== seedUser.id), seedUser], undefined, true);
+            fallbackAddAuditLog(seedUser.username, seedUser.id, "LOGIN_SUCCESS", "Secured localized session successfully initialized via dynamic cloud deployment.");
+            return seedUser;
+          } else {
+            throw authErr;
+          }
+        }
+
         const uid = userCred.user.uid;
 
         // D. Pull profile document from Firestore
@@ -777,13 +804,13 @@ export const dbService = {
           return healedUser;
         }
       } catch (err: any) {
-        console.error("[Firebase Login Error] Error: ", err);
         if (err.code === "auth/operation-not-allowed") {
           console.warn(
             "[Firebase Login Fallback] Firebase Email/Password provider is disabled. Falling back automatically to Local Secure checks."
           );
           return await dbService.signIn(emailOrUsername, passwordOrPin, true);
         }
+        console.error("[Firebase Login Error] Error: ", err);
         // Rethrow standard unauthorized auth exceptions clearly
         if (
           err.code === "auth/wrong-password" ||

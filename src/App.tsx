@@ -611,32 +611,19 @@ export default function App() {
   };
 
   // Quick direct bypass logic for Sandbox reviewers
-  const handleQuickLogin = (type: "user" | "admin") => {
-    const users = loadUsersData();
-    if (type === "user") {
-      const james = users.find((u) => u.username === "james");
-      if (james) {
-        setActiveUser(james);
-        addAuditLog(
-          james.username,
-          james.id,
-          "QUICK_LOGIN_USER",
-          "Logged in via Sandbox Direct Quick Link",
-        );
-        setCurrentView("user-dashboard");
+  const handleQuickLogin = async (type: "user" | "admin") => {
+    const email = type === "user" ? "james@unitycore.com" : "admin@unitycore.bank";
+    try {
+      const user = await dbService.signIn(email, "password123");
+      setActiveUser(user);
+      if (getActiveMode() === "firebase" && auth.currentUser && !auth.currentUser.emailVerified && user.role === "user") {
+        setCurrentView("verification-pending");
+      } else {
+        setCurrentView(user.role === "admin" ? "admin-dashboard" : "user-dashboard");
       }
-    } else {
-      const admin = users.find((u) => u.username === "admin");
-      if (admin) {
-        setActiveUser(admin);
-        addAuditLog(
-          admin.username,
-          admin.id,
-          "QUICK_LOGIN_ADMIN",
-          "Security controller authorized via direct link",
-        );
-        setCurrentView("admin-dashboard");
-      }
+    } catch (err: any) {
+      console.error("Quick login error:", err);
+      alert("Failed quick login: " + err.message);
     }
   };
 
