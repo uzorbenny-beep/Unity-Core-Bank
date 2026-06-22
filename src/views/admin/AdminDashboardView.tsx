@@ -444,6 +444,22 @@ export default function AdminDashboardView({ currentAdmin, onLogout, onRoleSwitc
     });
   };
 
+  // Listen to immediate state modification changes (deposit/withdrawals) within the same window or external store events
+  useEffect(() => {
+    const handleImmediateRefresh = () => {
+      console.log('[AdminDashboardView] State triggered immediately. Re-syncing and refreshing local ledger states.');
+      refreshLocalState();
+    };
+
+    window.addEventListener('unitycore_state_changed', handleImmediateRefresh);
+    window.addEventListener('storage', handleImmediateRefresh);
+
+    return () => {
+      window.removeEventListener('unitycore_state_changed', handleImmediateRefresh);
+      window.removeEventListener('storage', handleImmediateRefresh);
+    };
+  }, []);
+
   // Modify Balance & Account Parameters Executions
   const handleModifyBalances = async (e: React.FormEvent) => {
     e.preventDefault();

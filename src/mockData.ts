@@ -443,6 +443,11 @@ export function loadUsersData(): BankUser[] {
 export function saveUsersData(users: BankUser[], onlySyncUserId?: string, skipFirestoreSync = false) {
   localStorage.setItem('unitycore_users', JSON.stringify(users));
 
+  // Dispatch custom state changed event to instantly notify admin / other active views in same window
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('unitycore_state_changed'));
+  }
+
   if (skipFirestoreSync) return;
 
   // Async sync back to Firestore for persistence
@@ -487,7 +492,17 @@ export function saveUsersData(users: BankUser[], onlySyncUserId?: string, skipFi
             currency: u.currency || "USD",
             transactionPin: u.transactionPin || "",
             password: u.password || "",
-            iban: u.iban || ""
+            iban: u.iban || "",
+            transactions: (u.transactions || []).slice(0, 200).map(tx => ({
+              id: tx.id || "",
+              description: tx.description || "",
+              amount: Number(tx.amount) || 0,
+              date: tx.date || "",
+              timestamp: Number(tx.timestamp) || Date.now(),
+              category: tx.category || "",
+              status: tx.status || "successful",
+              targetAccountId: tx.targetAccountId || ""
+            }))
           };
 
           setDoc(uDoc, cleanUser, { merge: true }).then(() => {
